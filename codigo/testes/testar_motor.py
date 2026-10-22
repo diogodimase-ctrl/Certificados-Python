@@ -213,8 +213,8 @@ def geracao_oficial():
             m = json.load(f)
         igual(list(m)[:4], ["versaoManifesto", "loteId", "dataGeracao", "curso"])
         igual((m["curso"], m["local"], m["nomeAba"], m["semestre"], m["pastaMes"]),
-              ("Cardiologia Clínica", "PTA", "Abril26", "2026-1", "04.26"))
-        igual(m["pastaDestino"], "2026-1/PTA/Cardiologia Clínica/04.26")
+              ("Cardiologia Clínica", "PTA", "Abril26", "2026-5", "04.26"))
+        igual(m["pastaDestino"], "2026-5/PTA/Cardiologia Clínica/04.26")
         igual(len(m["arquivosDoLote"]), 5)
         maria = next(d for d in m["certificados"] if d["docente"] == "Maria Exemplo")
         igual([a["nomeArquivo"] for a in maria["arquivos"]],
@@ -236,7 +236,7 @@ def geracao_teste_e_simulacao():
         with open(os.path.join(envio, "manifesto.txt"), encoding="utf-8") as f:
             m = json.load(f)
         igual({d["email"] for d in m["certificados"]}, {"eu@teste.com"})
-        assert m["pastaDestino"].startswith("TESTE/2026-1/PTA/")
+        assert m["pastaDestino"].startswith("TESTE/2026-5/PTA/")
 
         antes = set(os.listdir(os.path.join(locais.declaracoes, "Para Enviar")))
         _, rel, modo = _gerar("simulacao", ConversorFalso(), raiz, locais)
@@ -290,14 +290,14 @@ def historico_de_envios():
         meses = historico.situacao(locais, cursos)[cardio.linha]
         igual([(m.rotulo, m.pendente) for m in meses], [("Abr26", True)])
         # O fluxo arquivou e apagou a pasta da Para Enviar: verde, com a data do envio.
-        destino = os.path.join(locais.declaracoes, "2026-1", "PTA", "Cardiologia Clínica", "04.26")
+        destino = os.path.join(locais.declaracoes, "2026-5", "PTA", "Cardiologia Clínica", "04.26")
         shutil.move(os.path.join(locais.declaracoes, "Para Enviar", c.nome_com_unidade, "04.26"), destino)
         meses = historico.situacao(locais, cursos)[cardio.linha]
         igual([(m.rotulo, m.pendente) for m in meses], [("Abr26", False)])
         assert re.match(r"\d\d/\d\d$", meses[0].data), meses[0].data
         # Pasta arquivada sem histórico (envio do AHK) também conta; outro curso não é afetado.
-        os.makedirs(os.path.join(locais.declaracoes, "2026-1", "PTA", "Cardiologia Clínica", "03.26"))
-        with open(os.path.join(locais.declaracoes, "2026-1", "PTA", "Cardiologia Clínica", "03.26", "a.pdf"), "w"):
+        os.makedirs(os.path.join(locais.declaracoes, "2026-5", "PTA", "Cardiologia Clínica", "03.26"))
+        with open(os.path.join(locais.declaracoes, "2026-5", "PTA", "Cardiologia Clínica", "03.26", "a.pdf"), "w"):
             pass
         sit = historico.situacao(locais, cursos)
         igual([m.rotulo for m in sit[cardio.linha]], ["Mar26", "Abr26"])
@@ -337,6 +337,81 @@ def painel_da_tela_inicial():
         igual(painel.contar_previstos(locais, cursos, "2026-5", "04.26", arquivo=cache), contagem)   # do cache
     finally:
         shutil.rmtree(raiz, ignore_errors=True)
+
+
+@teste
+def semestre_da_turma_e_mestre_com_meses():
+    igual([textos.semestre_da_turma("2026-1S"), textos.semestre_da_turma("2025-2S"),
+           textos.semestre_da_turma("", "2026-A-CEP-1S"), textos.semestre_da_turma("Planilha1", "2026-B-RJ-2S"),
+           textos.semestre_da_turma("2026-5"), textos.semestre_da_turma("x", "y")],
+          ["2026-5", "2025-6", "2026-5", "2026-6", "2026-5", ""])
+    from datetime import datetime as dt
+    igual([planilhas.mes_do_cabecalho(v) for v in ("mar/26", "Outubro/2026", dt(2026, 11, 1), "TURMA", None)],
+          ["03.26", "10.26", "11.26", "", ""])
+    import openpyxl
+    pasta = tempfile.mkdtemp()
+    try:
+        caminho = os.path.join(pasta, "mestre.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "2026-1S"
+        ws.append(["Coordenação", "Pós-graduação", "TURMA/UNIDADE", "mar/26", "abr/26", "set/26"])
+        ws.append(["Fulana", "Cardiologia", "2026-A-CEP-1S", "Enviado", "Enviado", None])
+        ws.append(["Beltrano", "Medicina da Dor", "2026-A-RJ-1S", "Enviado", "sem aula", None])
+        wb.save(caminho)
+        mestre = planilhas.ler_mestre(caminho, "2026-1S")
+        igual(mestre.meses, [("03.26", 4), ("04.26", 5), ("09.26", 6)])
+        cardio, dor = mestre.cursos
+        igual((cardio.turma, cardio.sigla_unidade, cardio.semestre, cardio.aba_mestre), ("", "CEP", "2026-5", "2026-1S"))
+        assert cardio.enviado("04.26") and not dor.enviado("04.26") and not cardio.enviado("09.26")
+        igual(dor.marcas, {"03.26": "Enviado", "04.26": "sem aula"})
+        # Ciclo fechado em setembro para Cardiologia (fora da Para Enviar) e pendente para a Dor.
+        sit = {cardio.linha: [historico.MesProcessado("09.26", "Set26", "", False, 8)],
+               dor.linha: [historico.MesProcessado("09.26", "Set26", "", True, 3),
+                           historico.MesProcessado("03.26", "Mar26", "", False, 3)]}
+        igual([(c.posgrad, m, col) for c, m, col in historico.para_marcar_na_mestre(mestre.cursos, sit, mestre.meses)],
+              [("Cardiologia", "09.26", 6)])
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+@teste
+def organizar_pasta_enviados():
+    from certificados import organizar
+    decl = tempfile.mkdtemp()
+    try:
+        def pdf(*partes, conteudo="x"):
+            os.makedirs(os.path.join(decl, *partes[:-1]), exist_ok=True)
+            with open(os.path.join(decl, *partes), "w") as f:
+                f.write(conteudo)
+        pdf("Enviados", "Cardiologia (2026-A-CEP-1S)", "04.26", "Ana.pdf")
+        pdf("Enviados", "Cardiologia (2026-A-CEP-1S)", "04.26", "Bia.pdf")
+        pdf("Enviados", "Cardiologia (2026-A-CEP-1S)", "04.26", "manifesto.txt")
+        pdf("Enviados", "Medicina da Dor (2025-B-RJ-2S) (1)", "10.25", "Caio.pdf")
+        pdf("Enviados", "Sem Codigo", "04.26", "Davi.pdf")
+        pdf("2026-5", "CEP", "Cardiologia", "04.26", "Ana.pdf")                    # já estava lá, igual
+        pdf("2026-5", "CEP", "Cardiologia", "04.26", "Bia.pdf", conteudo="outro")  # já estava, diferente
+        plano = organizar.planejar(decl)
+        igual(sorted((os.path.relpath(m.destino, decl) if m.destino else "", m.pdfs, bool(m.problema)) for m in plano),
+              [("", 1, True), (os.path.join("2025-6", "RJ", "Medicina da Dor", "10.25"), 1, False),
+               (os.path.join("2026-5", "CEP", "Cardiologia", "04.26"), 2, False)])
+        movidos, erros = organizar.mover(plano, log=lambda m: None)
+        igual((movidos, erros), (2, []))
+        destino = os.path.join(decl, "2026-5", "CEP", "Cardiologia", "04.26")
+        igual(sorted(os.listdir(destino)), ["Ana.pdf", "Bia (Enviados).pdf", "Bia.pdf"])
+        assert os.path.isfile(os.path.join(decl, "2025-6", "RJ", "Medicina da Dor", "10.25", "Caio.pdf"))
+        # O que não é PDF fica; a pasta sem destino fica; a pasta vazia sai.
+        assert os.path.isfile(os.path.join(decl, "Enviados", "Cardiologia (2026-A-CEP-1S)", "04.26", "manifesto.txt"))
+        assert os.path.isfile(os.path.join(decl, "Enviados", "Sem Codigo", "04.26", "Davi.pdf"))
+        assert not os.path.exists(os.path.join(decl, "Enviados", "Medicina da Dor (2025-B-RJ-2S) (1)"))
+        # O histórico acha o que está dentro de Antigas também.
+        os.makedirs(os.path.join(decl, "Antigas"))
+        shutil.move(os.path.join(decl, "2025-6"), os.path.join(decl, "Antigas", "2025-6"))
+        achados = historico.arquivados(type("Locais", (), {"declaracoes": decl})())
+        assert "10.25" in achados[(textos.normalizar("RJ"), textos.normalizar("Medicina da Dor"))]
+        assert "04.26" in achados[(textos.normalizar("CEP"), textos.normalizar("Cardiologia"))]
+    finally:
+        shutil.rmtree(decl, ignore_errors=True)
 
 
 @teste

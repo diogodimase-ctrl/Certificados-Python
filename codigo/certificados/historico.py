@@ -6,8 +6,10 @@ Junta duas fontes:
     compartilhado na pasta Declarações (vale para qualquer computador e para
     qualquer colega que use o programa);
   - as pastas que o fluxo do Power Automate já arquivou
-    (Declarações\\<Semestre>\\<Local>\\<Pós>\\<MM.AA>), o que inclui os envios
-    feitos pelo AHK v27.
+    (Declarações\\<AAAA-5 ou AAAA-6>\\<Local>\\<Pós>\\<MM.AA>, ou dentro de Antigas).
+
+A terceira fonte, a mais confiável, é a própria planilha mestre ("Enviado" na
+coluna do mês): ela é lida em planilhas.ler_mestre e juntada na tela.
 
 Cada mês de cada curso fica "ok" (arquivado pelo fluxo, ou gerado e já fora da
 Para Enviar) ou "pendente" (gerado, mas a pasta ainda está na Para Enviar).
@@ -23,6 +25,7 @@ from datetime import datetime
 from . import textos
 
 PASTA_HISTORICO = "_Programa Certificados"
+PASTA_ANTIGAS = "Antigas"
 ARQUIVO_HISTORICO = "historico.jsonl"
 _MESES_CURTOS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
@@ -69,7 +72,8 @@ def registrar(locais, relatorio, log=print):
             linhas.append({
                 "quando": agora, "usuario": usuario, "curso": c.curso.posgrad, "unidade": c.curso.unidade,
                 "sigla": c.curso.sigla_unidade or c.curso.unidade, "aba": aba, "pastaMes": pasta_mes,
-                "semestre": textos.semestre_do_mes(pasta_mes), "pastaEnvio": c.nome_com_unidade,
+                "semestre": c.curso.semestre or textos.semestre_da_turma(textos.semestre_do_mes(pasta_mes)),
+                "pastaEnvio": c.nome_com_unidade,
                 "pdfsNoCurso": res.gerados,
             })
     if not linhas:
@@ -120,11 +124,17 @@ def _pdfs(pasta):
 
 
 def arquivados(locais):
-    """{chave_curso: {pastaMes: (datetime, nº de PDFs)}} das pastas que o fluxo arquivou."""
+    """{chave_curso: {pastaMes: (datetime, nº de PDFs)}} das pastas que o fluxo arquivou:
+    Declarações\\<AAAA-5 ou AAAA-6>\\... e também dentro de Declarações\\Antigas."""
     achados = {}
-    raiz = locais.declaracoes
+    for raiz in (locais.declaracoes, os.path.join(locais.declaracoes, PASTA_ANTIGAS)):
+        _arquivados_em(raiz, achados)
+    return achados
+
+
+def _arquivados_em(raiz, achados):
     for semestre in _listar(raiz):
-        if not re.match(r"^\d{4}-[12]$", semestre):
+        if not re.match(r"^\d{4}-[1256]$", semestre):
             continue
         for sigla in _listar(os.path.join(raiz, semestre)):
             for pos in _listar(os.path.join(raiz, semestre, sigla)):
@@ -192,3 +202,16 @@ def meses_conhecidos(situacoes):
     """Pastas de mês que aparecem em algum curso, da mais nova para a mais antiga."""
     todos = {m.pasta_mes for lista in situacoes.values() for m in lista}
     return sorted(todos, key=_ordem, reverse=True)
+
+
+def para_marcar_na_mestre(cursos, situacoes, meses):
+    """Ciclos fechados (gerados pelo programa ou arquivados, e já fora da Para
+    Enviar) que ainda estão vazios na mestre: [(curso, pasta_mes, coluna)].
+    meses = [(pasta_mes, coluna)] das colunas de mês da aba."""
+    coluna = dict(meses)
+    saida = []
+    for c in cursos:
+        for m in situacoes.get(c.linha, []):
+            if not m.pendente and m.pasta_mes in coluna and not c.marcas.get(m.pasta_mes, "").strip():
+                saida.append((c, m.pasta_mes, coluna[m.pasta_mes]))
+    return saida

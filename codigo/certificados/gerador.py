@@ -279,7 +279,8 @@ def _gravar_manifesto(c, aba, mes, pasta, docentes, arquivos_do_lote, modo, emai
     if modo.nome == "teste":
         validos = [dict(d, email=email_teste) for d in validos]
     local = c.curso.sigla_unidade or c.curso.unidade
-    semestre = textos.semestre_do_mes(mes)
+    # Pasta do semestre da TURMA ("2026-5"); sem dado da turma, o semestre do mês.
+    semestre = c.curso.semestre or textos.semestre_da_turma(textos.semestre_do_mes(mes))
     pasta_pos = textos.sanitizar_nome_arquivo(c.curso.posgrad)
     pasta_local_sigla = textos.sanitizar_nome_arquivo(local) if local.strip() else ""
     destino = ""

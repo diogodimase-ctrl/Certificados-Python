@@ -31,8 +31,8 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
-from certificados import (VERSAO, caminhos, coordenadores, economia, gerador, historico, horas, painel, planilhas,
-                          textos)
+from certificados import (VERSAO, caminhos, coordenadores, economia, gerador, historico, horas, mestre_excel,
+                          organizar, painel, planilhas, textos)
 from certificados.pdf import ConversorPowerPoint, powerpoint_aberto
 import atualizacao
 import tema
@@ -326,6 +326,8 @@ class App(ctk.CTk):
                                                                                                 pady=(12, 4))
         quadro.pack(fill="x")
         conferir()
+        ctk.CTkButton(d.corpo, text="Organizar a pasta Enviados…", **tema.BOTAO_CONTORNO,
+                      command=lambda: self.organizar_enviados(d)).pack(anchor="w", pady=(12, 0))
         self.wait_window(d)
         self.modelo = var_modelo.get()
         mestre = var_mestre.get()
@@ -341,6 +343,41 @@ class App(ctk.CTk):
             self.abas_mestre, self.aba, self.cursos, self.marcados, self.situacoes = [], "", [], set(), None
             if self.etapa == 0:
                 self.ir_para(0)
+
+    def organizar_enviados(self, pai=None):
+        """Mostra o que está em Declarações\\Enviados e para onde vai; só move com OK."""
+        if not self.locais.declaracoes:
+            avisar(pai or self, "Pasta Declarações", "A pasta Declarações do OneDrive não foi encontrada.")
+            return
+        plano = organizar.planejar(self.locais.declaracoes)
+        if not plano:
+            avisar(pai or self, "Nada para organizar", "A pasta Enviados não tem PDFs.")
+            return
+        prontos = [m for m in plano if not m.problema]
+        d = Dialogo(pai or self, "Organizar a pasta Enviados",
+                    f"{len(prontos)} pasta(s) vão para o lugar oficial (semestre da turma › unidade › pós › mês). "
+                    f"{len(plano) - len(prontos)} fica(m) onde está(ão) (não deu para saber o destino). Nada é apagado: "
+                    "PDF repetido igual no destino só deixa de ficar em dobro.",
+                    [("Cancelar", None), (f"Mover {len(prontos)} pasta(s)", True)], largura=1100)
+        quadro, arvore = tabela(d.corpo, [("origem", "Em Enviados", 380), ("pdfs", "PDFs", 60),
+                                          ("destino", "Vai para", 560)], alturas=14)
+        quadro.pack(fill="both", expand=True)
+        decl = self.locais.declaracoes
+        for m in plano:
+            destino = os.path.relpath(m.destino, decl) if m.destino else f"fica — {m.problema}"
+            arvore.insert("", "end", values=(m.rotulo_origem, m.pdfs, destino), tags=("apagado" if m.problema else "ok",))
+        self.wait_window(d)
+        if d.escolha is not True or not prontos:
+            return
+        movidos, erros = organizar.mover(plano, log=self.registrar)
+        avisar(pai or self, "Pasta Enviados organizada" if not erros else "Organizada, com problemas",
+               f"{movidos} PDF(s) movidos para as pastas de semestre." +
+               ("\n\nNão deu para mover:\n" + "\n".join(f"• {e}" for e in erros[:15]) if erros else ""))
+        self.situacoes = None
+        if self.etapa == 0 and self.cursos:
+            cursos, locais = self.cursos, self.locais
+            em_segundo_plano(self, lambda: historico.situacao(locais, cursos),
+                             lambda st: self._situacao_carregada(cursos, st))
 
     # -- estado e navegação ---------------------------------------------------
 
@@ -535,19 +572,25 @@ class App(ctk.CTk):
         if aba == self.aba and self.cursos:
             return
         self.aba, self.cursos, self.marcados, self.situacoes, self.mes_painel = aba, [], set(), None, ""
+        self.meses_mestre = []
         self._desenhar_abas()
         self._preencher_meses()
         self.tabela_cursos.mostrar([], self.meses_semestre, self.mes_painel, f"Lendo os cursos da aba {aba}…")
         self.ocupado(f"Lendo os cursos da aba {aba}…")
-        em_segundo_plano(self, lambda: planilhas.ler_cursos_da_mestre(self.mestre, aba),
-                         lambda cursos: self._cursos_carregados(aba, cursos))
+        em_segundo_plano(self, lambda: planilhas.ler_mestre(self.mestre, aba),
+                         lambda mestre: self._cursos_carregados(aba, mestre))
 
-    def _cursos_carregados(self, aba, cursos):
+    def _cursos_carregados(self, aba, mestre):
         self.livre()
         if aba != self.aba:
             return
-        self.cursos = cursos or []
-        if cursos is None:
+        self.cursos = mestre.cursos if mestre else []
+        self.meses_mestre = mestre.meses if mestre else []
+        if self.meses_mestre:
+            self.mes_painel = ""                 # escolhe de novo o mês padrão, agora com os meses da mestre
+        if self._na_inicio():
+            self._preencher_meses()
+        if mestre is None:
             self.status.configure(text=f"A aba {aba} não foi encontrada.", text_color=COR_ERRO)
         if self._na_inicio():
             self._desenhar_cursos()
@@ -567,12 +610,47 @@ class App(ctk.CTk):
             self.status.configure(text="")
             self._desenhar_cursos()
             self._contar_previstos()
+        self._marcar_na_mestre()
+
+    def _marcar_na_mestre(self):
+        """Ciclo fechado (gerado e já fora da Para Enviar) e célula vazia na mestre: escreve "Enviado"."""
+        candidatos = historico.para_marcar_na_mestre(self.cursos, self.situacoes or {}, self.meses_mestre)
+        if not candidatos or getattr(self, "_marcando", False) or not os.path.isfile(self.mestre or ""):
+            return
+        coluna = dict(self.meses_mestre)
+        modelo = next(((c.linha, coluna[m]) for c in self.cursos for m in c.marcas if c.enviado(m) and m in coluna),
+                      None)
+        mestre, aba, cursos = self.mestre, self.aba, self.cursos
+        celulas = [(c.linha, col) for c, _, col in candidatos]
+        self._marcando = True
+
+        def pronto(escritas):
+            self._marcando = False
+            if cursos is not self.cursos:
+                return
+            for c, m, _ in candidatos:
+                c.marcas.setdefault(m, mestre_excel.TEXTO)
+            if self._na_inicio():
+                self._desenhar_cursos()
+                if escritas:
+                    self.status.configure(text=f"✓ Marquei \"Enviado\" em {escritas} curso/mês na planilha mestre.",
+                                          text_color=COR_OK)
+
+        def falhou(erro, detalhe):
+            self._marcando = False
+            self.registrar(f"Mestre não marcada: {erro}\n{detalhe}")
+            if self._na_inicio():
+                self.status.configure(text=f"Não consegui marcar \"Enviado\" na mestre: {erro}", text_color=COR_AVISO)
+
+        em_segundo_plano(self, lambda: mestre_excel.marcar_enviados(mestre, aba, celulas, modelo,
+                                                                    log=self.registrar), pronto, falhou)
 
     # mês do painel
 
     @property
     def meses_semestre(self):
-        return painel.meses_do_semestre(self.aba)
+        """Os meses do cabeçalho da aba da mestre; se ela não tiver, os 6 do semestre."""
+        return [m for m, _ in getattr(self, "meses_mestre", [])] or painel.meses_do_semestre(self.aba)
 
     def _preencher_meses(self):
         meses = self.meses_semestre
@@ -625,6 +703,18 @@ class App(ctk.CTk):
                 return m
         return None
 
+    def _estado(self, curso, mes):
+        """(estado, PDFs conhecidos). Estado: "ok" (Enviado na mestre ou ciclo fechado), "pendente"
+        (ainda na Para Enviar), "outro" (a mestre tem outro texto na célula) ou None (não feito)."""
+        feito = self._mes_do_curso(curso, mes)
+        if feito and feito.pendente:
+            return "pendente", feito.pdfs
+        if curso.enviado(mes) or feito:
+            return "ok", feito.pdfs if feito else None
+        if curso.marcas.get(mes, "").strip():
+            return "outro", None
+        return None, None
+
     def _desenhar_cursos(self):
         if not self._na_inicio():
             return
@@ -634,42 +724,45 @@ class App(ctk.CTk):
         linhas, escondidos = [], 0
         feitos = pendentes = sem_aulas = cert_feitos = cert_previstos = 0
         for c in self.cursos:
-            atual = self._mes_do_curso(c, mes)
+            estado, pdfs_conhecidos = self._estado(c, mes)
+            feito = estado in ("ok", "pendente")
             previsto = previstos.get(c.linha) if previstos else None
-            if atual:
+            if feito:
                 feitos += 1
-                pendentes += atual.pendente
-            elif previstos and previsto == 0:
+                pendentes += estado == "pendente"
+            elif estado == "outro" or (previstos and previsto == 0):
                 sem_aulas += 1
+            # PDFs feitos: os contados nas pastas; "Enviado" na mestre sem pasta conta o previsto inteiro.
+            pdfs = (pdfs_conhecidos if pdfs_conhecidos is not None else (previsto or 0)) if feito else 0
             if previstos:
-                pdfs = atual.pdfs if atual else 0
                 cert_feitos += pdfs
                 cert_previstos += max(previsto or 0, pdfs)
             if filtro and filtro not in textos.normalizar(f"{c.posgrad} {c.unidade} {c.coordenacao}"):
                 continue
-            if self.var_esconder.get() and atual:
+            if self.var_esconder.get() and feito:
                 escondidos += 1
                 continue
             meses = []
             for m in self.meses_semestre:
-                feito = self._mes_do_curso(c, m)
-                if feito:
-                    meses.append("pendente" if feito.pendente else "ok")
-                elif m == mes and previstos and previsto == 0:
+                e, _ = self._estado(c, m)
+                if e in ("ok", "pendente"):
+                    meses.append(e)
+                elif e == "outro" or (m == mes and previstos and previsto == 0):
                     meses.append("futuro")
                 else:
                     meses.append("falta" if painel.ja_passou(m) and self.situacoes is not None else "futuro")
-            if self.situacoes is None or (previstos is None and not atual):
+            if not feito and previstos is None:
                 cert, cor = ("…" if self.situacoes is None or self._contando else ""), tema.APAGADO
-            elif previstos is not None and previsto is None:
-                cert, cor = (f"{atual.pdfs} feitos" if atual else "sem planilha"), tema.APAGADO
-            elif previstos is not None and previsto == 0 and not atual:
-                cert, cor = "sem aulas", tema.APAGADO
+            elif not feito and previsto is None:
+                cert, cor = "sem planilha", tema.APAGADO
+            elif not feito and (estado == "outro" or previsto == 0):
+                cert, cor = c.marcas.get(mes, "") or "sem aulas", tema.APAGADO
+            elif feito and previstos is None and pdfs_conhecidos is None:
+                cert, cor = mestre_excel.TEXTO, tema.OK
             else:
-                pdfs = atual.pdfs if atual else 0
                 total = max(previsto or 0, pdfs)
                 cert = f"{pdfs} de {total}" if previstos is not None else f"{pdfs} feitos"
-                cor = tema.OK if atual and not atual.pendente else (tema.AVISO if atual else tema.TEXTO_2)
+                cor = tema.OK if estado == "ok" else (tema.AVISO if feito else tema.TEXTO_2)
             linhas.append({"linha": c.linha, "marcado": c.linha in self.marcados, "pos": c.posgrad,
                            "coord": c.coordenacao, "uni": c.sigla_unidade or c.unidade or "—", "turma": c.turma,
                            "meses": meses, "cert": cert, "cert_cor": cor})
@@ -695,7 +788,8 @@ class App(ctk.CTk):
                 self.rosca_certificados.carregando("lendo as planilhas dos cursos…")
             else:
                 self.rosca_certificados.mostrar(cert_feitos, cert_previstos,
-                                                f"{max(cert_previstos - cert_feitos, 0)} faltando")
+                                                f"{max(cert_previstos - cert_feitos, 0)} faltando" if cert_previstos
+                                                else f"nenhuma planilha de curso tem {nome_mes}")
         self._atualizar_continuar()
 
     def _marcar(self, linha):

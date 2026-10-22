@@ -222,6 +222,7 @@ class PlanilhaCursos(ctk.CTkFrame):
         self.escala = ctk.ScalingTracker.get_widget_scaling(self)
         self.ao_clicar = ao_clicar
         self.linhas, self.meses, self.mes_destaque, self.vazio = [], [], "", "Nenhum curso"
+        self.colunas, self._passo = list(self.COLUNAS), 36
         self._fontes, self._sobre = {}, None
         self.cab = tk.Canvas(self, height=self.px(self.LETRAS + self.TITULOS), bg=tema.LATERAL,
                              highlightthickness=0, bd=0)
@@ -256,24 +257,34 @@ class PlanilhaCursos(ctk.CTkFrame):
 
     def mostrar(self, linhas, meses, mes_destaque, vazio="Nenhum curso"):
         self.linhas, self.meses, self.mes_destaque, self.vazio = linhas, meses, mes_destaque, vazio
+        # Mestre sem coluna de turma: a coluna sai. Muitos meses: barrinhas mais estreitas.
+        com_turma = any(l.get("turma") for l in linhas)
+        self.colunas = [c for c in self.COLUNAS if c[0] != "turma" or com_turma]
+        self._passo = 36 if len(meses) <= 6 else 32
         self._sobre = None
         self.desenhar()
 
     # -- medidas ------------------------------------------------------------
 
     def _larguras(self, total):
-        fixas = sum(self.px(l) for _, _, l, _ in self.COLUNAS if l)
-        pesos = sum(p for _, _, l, p in self.COLUNAS if not l)
+        fixas = (sum(self.px(l) for k, _, l, _ in self.colunas if l and k != "meses")
+                 + self.px(self._largura_meses()))
+        pesos = sum(p for _, _, l, p in self.colunas if not l)
         sobra = max(self.px(120) * pesos, total - self.px(self.NUM) - fixas)
         xs, x = {}, self.px(self.NUM)
-        for chave, _, larg, peso in self.COLUNAS:
+        for chave, _, larg, peso in self.colunas:
+            if chave == "meses":                # uma barrinha por mês da aba da mestre
+                larg = self._largura_meses()
             w = self.px(larg) if larg else sobra * peso / pesos
             xs[chave] = (x, x + w)
             x += w
         return xs, x
 
+    def _largura_meses(self):
+        return max(120, 16 + self._passo * len(self.meses))
+
     def _x_mes(self, x0, i):
-        return x0 + self.px(12) + i * self.px(36)
+        return x0 + self.px(12) + i * self.px(self._passo)
 
     # -- desenho ------------------------------------------------------------
 
@@ -313,18 +324,20 @@ class PlanilhaCursos(ctk.CTkFrame):
             pad = self.px(10)
             for chave, cor, fonte_ in (("pos", tema.TEXTO, f), ("coord", tema.TEXTO_2, f), ("uni", tema.UNIDADE, fb),
                                        ("turma", tema.TEXTO_2, f)):
+                if chave not in xs:
+                    continue
                 a, b = xs[chave]
                 c.create_text(a + pad, ym, anchor="w", fill=cor, font=fonte_,
                               text=self.cortar(l[chave], b - a - 2 * pad, fonte_))
             a, _ = xs["meses"]
             for j, estado in enumerate(l["meses"]):
                 x = self._x_mes(a, j)
-                c.create_rectangle(x, ym - self.px(5), x + self.px(28), ym + self.px(5),
+                c.create_rectangle(x, ym - self.px(5), x + self.px(self._passo - 8), ym + self.px(5),
                                    fill=COR_MES.get(estado, tema.BORDA), outline="")
             a, b = xs["cert"]
             c.create_text(b - pad, ym, anchor="e", fill=l.get("cert_cor") or tema.TEXTO_2, font=f, text=l["cert"])
             # grade
-            for chave, _, _, _ in self.COLUNAS:
+            for chave, _, _, _ in self.colunas:
                 c.create_line(xs[chave][1], y0, xs[chave][1], y1, fill=tema.LINHA)
             c.create_line(self.px(self.NUM), y0, self.px(self.NUM), y1, fill=tema.LINHA)
             c.create_line(0, y1 - 1, fim, y1 - 1, fill=tema.LINHA)
@@ -338,13 +351,13 @@ class PlanilhaCursos(ctk.CTkFrame):
         c.create_rectangle(0, hl, fim, hl + ht, fill=tema.SECUNDARIO_HOVER, outline="")
         c.create_rectangle(0, hl, self.px(self.NUM), hl + ht, fill=tema.LATERAL, outline="")
         c.create_text(self.px(self.NUM) / 2, hl + ht / 2, text="1", fill=tema.APAGADO, font=self.fonte(12))
-        for i, (chave, titulo, _, _) in enumerate(self.COLUNAS):
+        for i, (chave, titulo, _, _) in enumerate(self.colunas):
             a, b = xs[chave]
             c.create_text((a + b) / 2, hl / 2, text=chr(ord("A") + i), fill=tema.APAGADO, font=self.fonte(12))
             c.create_line(b, 0, b, hl + ht, fill=tema.BORDA)
             if chave == "meses":
                 for j, mes in enumerate(self.meses):
-                    x = self._x_mes(a, j) + self.px(14)
+                    x = self._x_mes(a, j) + self.px((self._passo - 8) / 2)
                     destaque = mes == self.mes_destaque
                     c.create_text(x, hl + ht / 2, text=curto(mes), font=self.fonte(13, destaque),
                                   fill=tema.TEXTO if destaque else tema.TEXTO_2)

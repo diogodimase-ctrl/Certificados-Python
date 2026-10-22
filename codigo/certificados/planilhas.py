@@ -221,6 +221,8 @@ class Curso:
     unidade: str          # código da turma, ex. "2026-A-PTA-1S"
     sigla_unidade: str    # ex. "PTA"
     turma: str
+    aba_mestre: str = ""                                  # ex. "2026-1S"
+    marcas: dict = field(default_factory=dict)            # {"10.26": "Enviado"}: colunas de mês da mestre
 
     @property
     def unidade_exibida(self):
@@ -228,14 +230,44 @@ class Curso:
             return f"{self.sigla_unidade} ({self.unidade})"
         return self.unidade
 
+    @property
+    def semestre(self):
+        """Pasta do semestre no SharePoint ("2026-5"), pelo semestre da turma."""
+        return textos.semestre_da_turma(self.aba_mestre, self.unidade)
 
-def ler_cursos_da_mestre(caminho, nome_aba):
-    """LerCursosDaMestre: A = coordenação, B = pós, C = código da turma, D = turma.
+    def enviado(self, pasta_mes):
+        return "envi" in textos.normalizar(self.marcas.get(pasta_mes, ""))
+
+
+@dataclass
+class Mestre:
+    cursos: list
+    meses: list           # [(pasta_mes, coluna)] na ordem do cabeçalho
+
+
+def mes_do_cabecalho(valor):
+    """Cabeçalho de coluna de mês: data do Excel ou texto "mar/26" -> "03.26"; senão ""."""
+    if isinstance(valor, (datetime, date)):
+        return f"{valor.month:02d}.{valor.year % 100:02d}"
+    pasta = textos.mes_para_pasta(valor_texto(valor).strip()) if valor not in (None, "") else ""
+    return pasta if re.fullmatch(r"\d{2}\.\d{2}", pasta or "") else ""
+
+
+def ler_mestre(caminho, nome_aba):
+    """A = coordenação, B = pós, C = código da turma. Da coluna D em diante, as
+    colunas cujo cabeçalho (linha 1) é um mês ("mar/26") guardam o que foi
+    enviado ("Enviado"). Se a D não for mês, ela é a turma (mestre antiga).
     Devolve None se a aba não existir."""
     ws = _achar_aba(_abrir(caminho), nome_aba)
     if ws is None:
         return None
     aba = Aba(ws)
+    meses = []
+    for col in range(4, (ws.max_column or 4) + 1):
+        pasta = mes_do_cabecalho(aba.celula(1, col).value)
+        if pasta and all(m != pasta for m, _ in meses):
+            meses.append((pasta, col))
+    col_turma = 4 if all(c != 4 for _, c in meses) else 0
     cursos = []
     for linha in range(2, aba.ultima_linha(2) + 1):
         valor = lambda col: valor_texto(aba.celula(linha, col).value).strip()
@@ -243,8 +275,16 @@ def ler_cursos_da_mestre(caminho, nome_aba):
         if not posgrad:
             continue
         codigo = valor(3)
-        cursos.append(Curso(linha, valor(1), posgrad, codigo, textos.sigla_unidade(codigo), valor(4)))
-    return cursos
+        marcas = {pasta: valor(col) for pasta, col in meses if valor(col)}
+        cursos.append(Curso(linha, valor(1), posgrad, codigo, textos.sigla_unidade(codigo),
+                            valor(col_turma) if col_turma else "", ws.title, marcas))
+    return Mestre(cursos, meses)
+
+
+def ler_cursos_da_mestre(caminho, nome_aba):
+    """LerCursosDaMestre. Devolve None se a aba não existir."""
+    mestre = ler_mestre(caminho, nome_aba)
+    return None if mestre is None else mestre.cursos
 
 
 # ---------------------------------------------------------------------------

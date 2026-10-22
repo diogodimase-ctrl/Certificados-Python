@@ -37,7 +37,26 @@ def iscc():
     sys.exit("Inno Setup 6 não encontrado (winget install JRSoftware.InnoSetup).")
 
 
+NECESSARIOS = ["comtypes", "comtypes.client", "pptx", "openpyxl", "customtkinter", "PIL"]
+
+
+def conferir_bibliotecas():
+    """O PyInstaller só avisa (e segue) quando falta uma biblioteca: o programa sairia sem ela.
+    Foi o que aconteceu na 0.3.0/0.3.1 (sem comtypes, o PowerPoint não converte)."""
+    import importlib
+    faltando = []
+    for nome in NECESSARIOS:
+        try:
+            importlib.import_module(nome)
+        except ImportError:
+            faltando.append(nome)
+    if faltando:
+        sys.exit(f"Faltam bibliotecas neste Python: {', '.join(faltando)}\n"
+                 f"  python -m pip install comtypes python-pptx openpyxl customtkinter pillow pyinstaller")
+
+
 def main():
+    conferir_bibliotecas()
     trabalho = os.path.join(PROJETO, "build_programa")
     saida = os.path.join(PROJETO, "dist_programa")
     shutil.rmtree(os.path.join(saida, "Certificados"), ignore_errors=True)
@@ -45,6 +64,7 @@ def main():
                     "--name", "Certificados", "--icon", os.path.join(PROJETO, "icone.ico"),
                     "--add-data", f"{os.path.join(PROJETO, 'icone.ico')};.",
                     "--collect-all", "customtkinter", "--hidden-import", "comtypes.client",
+                    "--collect-submodules", "comtypes",
                     "--paths", PROJETO, "--distpath", saida, "--workpath", trabalho, "--specpath", trabalho,
                     os.path.join(PROJETO, "programa.py")], check=True, cwd=PROJETO)
     subprocess.run([iscc(), f"/DVersao={VERSAO}", os.path.join(AQUI, "certificados.iss")], check=True)

@@ -15,7 +15,12 @@ Versão em Python do `GerarCertificados` (AHK v27). Em construção, por etapas:
    marcado, o lugar da data mostra o tempo economizado (`certificados/economia.py`,
    11 min 33 s por certificado no jeito manual, guardado só neste computador).
    Modo (Teste/Oficial), e-mail de teste e arquivos ficam no alto da janela.
-   Meses já enviados: `certificados/historico.py` (histórico em
+   Meses já enviados: a própria planilha mestre ("Enviado" nas colunas de mês, lida em
+   `planilhas.ler_mestre`); quando um ciclo fecha (o lote saiu da Para Enviar), o programa
+   escreve "Enviado" na célula vazia pelo Excel (`certificados/mestre_excel.py`). Destino
+   dos PDFs: `Declarações\<AAAA-5|AAAA-6 da turma>\<unidade>\<pós>\<MM.AA>`; a pasta
+   antiga "Enviados" é reorganizada por `certificados/organizar.py` (botão em "Arquivos e
+   pastas"). Também: `certificados/historico.py` (histórico em
    `Declarações\_Programa Certificados\historico.jsonl` mais as pastas arquivadas pelo
    fluxo). Certificados previstos no mês: `certificados/painel.py` (lê a planilha de
    cada curso; contagem guardada em `%APPDATA%\CertificadosPython\contagem.json`).

@@ -166,6 +166,19 @@ def semestre_do_mes(pasta_mes):
     return f"{ano - 1}-2"
 
 
+def semestre_da_turma(aba_mestre="", codigo=""):
+    """Pasta do semestre no SharePoint, pelo semestre da TURMA (todos os meses
+    da mesma pós ficam juntos): aba "2026-1S" ou código "2026-A-CEP-1S" ->
+    "2026-5"; 2º semestre -> "2026-6". Vazio se não der para saber."""
+    for texto, regra in ((aba_mestre, r"(20\d{2}|\d{2})\s*[-._ ]?\s*([1256])\s*S?\b"),
+                         (codigo, r"^(20\d{2})\b.*?\b([12])S\s*$")):
+        m = re.search(regra, str(texto or "").strip(), re.I)
+        if m:
+            ano = m.group(1) if len(m.group(1)) == 4 else "20" + m.group(1)
+            return f"{ano}-{'5' if m.group(2) in ('1', '5') else '6'}"
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Unidade e semestre (busca da planilha do curso)
 # ---------------------------------------------------------------------------
