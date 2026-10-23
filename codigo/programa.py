@@ -33,8 +33,8 @@ import customtkinter as ctk
 
 from openpyxl.utils import get_column_letter
 
-from certificados import (VERSAO, caminhos, coordenadores, economia, gerador, historico, horas, organizar, painel,
-                          planilhas, textos)
+from certificados import (VERSAO, caminhos, coordenadores, economia, gerador, historico, horas, mestre_excel,
+                          organizar, painel, planilhas, textos)
 from certificados.pdf import ConversorPowerPoint, powerpoint_aberto
 import atualizacao
 import tema
@@ -631,9 +631,47 @@ class App(ctk.CTk):
             self.status.configure(text="")
             self._desenhar_cursos()
             self._contar_previstos()
+        self._marcar_na_mestre()
         self._lembrar_mestre()
 
-    # lembrete de marcar "Enviado" na mestre (o Excel do PC não é licenciado: quem marca é a pessoa)
+    # "Enviado" na mestre: primeiro tenta escrever pelo Excel do PC; se não der (Excel sem licença, planilha
+    # presa), a tela inicial lembra a pessoa de marcar à mão.
+
+    def _marcar_na_mestre(self):
+        """Ciclo fechado e célula vazia na mestre: tenta escrever "Enviado". Cada célula é tentada uma vez
+        por sessão, para não abrir um Excel escondido a cada releitura."""
+        tentadas = self.__dict__.setdefault("_celulas_tentadas", set())
+        candidatos = [x for x in self._falta_marcar() if (self.aba, x[0].linha, x[2]) not in tentadas]
+        if not candidatos or getattr(self, "_marcando", False) or not os.path.isfile(self.mestre or ""):
+            return
+        tentadas.update((self.aba, c.linha, col) for c, _, col in candidatos)
+        coluna = dict(self.meses_mestre)
+        modelo = next(((c.linha, coluna[m]) for c in self.cursos for m in c.marcas if c.enviado(m) and m in coluna),
+                      None)
+        mestre, aba, cursos = self.mestre, self.aba, self.cursos
+        celulas = [(c.linha, col) for c, _, col in candidatos]
+        self._marcando = True
+
+        def pronto(escritas):
+            self._marcando = False
+            if cursos is not self.cursos:
+                return
+            for c, m, _ in candidatos:
+                c.marcas.setdefault(m, ENVIADO)
+            if self._na_inicio():
+                self._desenhar_cursos()
+                self._lembrar_mestre()
+                if escritas:
+                    self.status.configure(text=f"✓ Marquei \"{ENVIADO}\" em {escritas} curso/mês na planilha mestre.",
+                                          text_color=COR_OK)
+
+        def falhou(erro, detalhe):
+            self._marcando = False
+            self.registrar(f"Mestre não marcada pelo Excel: {erro}\n{detalhe}")
+            self._lembrar_mestre()
+
+        em_segundo_plano(self, lambda: mestre_excel.marcar_enviados(mestre, aba, celulas, modelo,
+                                                                    log=self.registrar), pronto, falhou)
 
     def _chave_marcado(self, curso, mes):
         return "|".join(textos.normalizar(x) for x in (self.aba, curso.sigla_unidade or curso.unidade,
@@ -650,7 +688,7 @@ class App(ctk.CTk):
     def _lembrar_mestre(self):
         if not self._na_inicio():
             return
-        falta = self._falta_marcar() if self.situacoes is not None else []
+        falta = self._falta_marcar() if self.situacoes is not None and not getattr(self, "_marcando", False) else []
         if falta:
             self.rotulo_faixa_mestre.configure(
                 text=f"✎  Falta escrever \"{ENVIADO}\" na planilha mestre: {len(falta)} curso/mês já enviado(s) "
@@ -682,7 +720,8 @@ class App(ctk.CTk):
             return
         d = Dialogo(self, f"Marcar \"{ENVIADO}\" na planilha mestre",
                     f"Estes cursos já foram enviados e arquivados pelo fluxo, mas a célula do mês ainda está vazia "
-                    f"na mestre (aba {self.aba}). Abra a mestre no Excel do navegador, escreva \"{ENVIADO}\" em "
+                    f"na mestre (aba {self.aba}) e o programa não conseguiu escrever pelo Excel deste computador "
+                    f"(a planilha pode estar aberta ou presa). Abra a mestre no Excel do navegador, escreva \"{ENVIADO}\" em "
                     f"cada célula abaixo e depois clique em \"Já marquei\". Até lá, este aviso continua aparecendo.",
                     [("Depois", False), ("Já marquei", True)], largura=760)
         quadro, arvore = tabela(d.corpo, [("celula", "Célula", 70), ("mes", "Mês", 70), ("uni", "Unidade", 120),
@@ -949,10 +988,10 @@ class App(ctk.CTk):
         quadro, self.arvore_coord = tabela(self.conteudo, [("curso", "Curso", 260), ("assina", "Assina como", 300),
                                                            ("arquivo", "Assinatura", 200),
                                                            ("situacao", "Situação", 200)], alturas=12)
-        quadro.pack(fill="both", expand=True)
         self.arvore_coord.bind("<Double-1>", lambda e: self._resolver_linha())
         botoes = ctk.CTkFrame(self.conteudo, fg_color="transparent")
-        botoes.pack(fill="x", pady=8)
+        botoes.pack(side="bottom", fill="x", pady=8)
+        quadro.pack(fill="both", expand=True)
         ctk.CTkButton(botoes, text="Escolher assinatura…", command=self._escolher_assinatura).pack(side="left")
         ctk.CTkButton(botoes, text="Dr. / Dra.", command=self._escolher_titulo).pack(side="left", padx=8)
         ctk.CTkButton(botoes, text="Tirar do lote / devolver", **tema.BOTAO_CONTORNO,
@@ -1115,12 +1154,13 @@ class App(ctk.CTk):
                        "encontrada, dê duplo clique na linha e escolha o arquivo. Depois marque os meses.")
         quadro, self.arvore_plan = tabela(self.conteudo, [("curso", "Curso", 280), ("planilha", "Planilha", 420),
                                                           ("meses", "Meses na planilha", 200)], alturas=9)
-        quadro.pack(fill="both", expand=True)
         self.arvore_plan.bind("<Double-1>", self._trocar_planilha)
-        ctk.CTkLabel(self.conteudo, text="Meses desta rodada", font=(FONTE, 16, "bold"), anchor="w").pack(
-            fill="x", pady=(12, 2))
+        # Embaixo primeiro (side="bottom"): em tela baixa (1366x768) a tabela encolhe e os meses não somem.
         self.quadro_meses = ctk.CTkFrame(self.conteudo, fg_color="transparent")
-        self.quadro_meses.pack(fill="x")
+        self.quadro_meses.pack(side="bottom", fill="x")
+        ctk.CTkLabel(self.conteudo, text="Meses desta rodada", font=(FONTE, 16, "bold"), anchor="w").pack(
+            side="bottom", fill="x", pady=(12, 2))
+        quadro.pack(fill="both", expand=True)
         self._desenhar_planilhas()
 
     def _desenhar_planilhas(self):
@@ -1254,10 +1294,10 @@ class App(ctk.CTk):
                                                           ("linha", "Linha", 60), ("docente", "Docente", 170),
                                                           ("problema", "Problema", 280), ("decisao", "Decisão", 110)],
                                           alturas=12)
-        quadro.pack(fill="both", expand=True)
         self.arvore_prob.bind("<Double-1>", lambda e: self._corrigir())
         botoes = ctk.CTkFrame(self.conteudo, fg_color="transparent")
-        botoes.pack(fill="x", pady=8)
+        botoes.pack(side="bottom", fill="x", pady=8)
+        quadro.pack(fill="both", expand=True)
         ctk.CTkButton(botoes, text="Corrigir…", command=self._corrigir).pack(side="left")
         ctk.CTkButton(botoes, text="Gerar assim", command=self._gerar_assim).pack(side="left", padx=8)
         ctk.CTkButton(botoes, text="Pular", **tema.BOTAO_CONTORNO,
@@ -1495,7 +1535,6 @@ class App(ctk.CTk):
                 f"\"{ENVIADO}\" na planilha mestre nesses cursos."))).pack(fill="x", pady=(0, 10))
         quadro, arvore = tabela(self.conteudo, [("curso", "Curso", 340), ("gerados", "Gerados", 90),
                                                 ("ignorados", "Ignorados", 90), ("sit", "Situação", 360)], alturas=8)
-        quadro.pack(fill="both", expand=True)
         for r in rel.cursos:
             arvore.insert("", "end", values=(r.curso.curso.posgrad, r.gerados, r.ignorados,
                                              f"FALHOU — {r.falhou}" if r.falhou else "ok"),
@@ -1505,12 +1544,13 @@ class App(ctk.CTk):
                 arvore.insert("", "end", values=(item.curso.posgrad, "—", "—", f"fora do lote: {item.removido}"),
                               tags=("apagado",))
         extras = [f"✗ {f}" for f in rel.falhas] + [f"! {a}" for a in rel.avisos]
+        botoes = ctk.CTkFrame(self.conteudo, fg_color="transparent")
+        botoes.pack(side="bottom", fill="x", pady=(10, 0))
         if extras:
             caixa = ctk.CTkTextbox(self.conteudo, height=110, font=("Consolas", 11))
-            caixa.pack(fill="x", pady=(8, 0))
+            caixa.pack(side="bottom", fill="x", pady=(8, 0))
             caixa.insert("end", "\n".join(extras))
-        botoes = ctk.CTkFrame(self.conteudo, fg_color="transparent")
-        botoes.pack(fill="x", pady=(10, 0))
+        quadro.pack(fill="both", expand=True)
         para_enviar = os.path.join(self.locais.declaracoes, "Para Enviar")
         for rotulo, caminho in (("Abrir pasta dos PDFs", self.modo.pasta_local), ("Abrir Para Enviar", para_enviar),
                                 ("Abrir log", rel.log)):
