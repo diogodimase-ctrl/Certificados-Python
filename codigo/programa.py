@@ -439,6 +439,14 @@ class App(ctk.CTk):
     def registrar(self, msg):
         if self.log:
             self.log(msg)
+            return
+        # fora de uma rodada (abertura, mestre, pastas): log próprio, para não perder erros
+        if getattr(self, "log_programa", None) is None:
+            try:
+                self.log_programa = gerador.Log("oficial", prefixo="programa")
+            except OSError:
+                return
+        self.log_programa(msg)
 
     def mostrar_erro(self, erro, detalhe=""):
         self.registrar(f"ERRO: {erro}\n{detalhe}")
@@ -640,7 +648,8 @@ class App(ctk.CTk):
             self._marcando = False
             self.registrar(f"Mestre não marcada: {erro}\n{detalhe}")
             if self._na_inicio():
-                self.status.configure(text=f"Não consegui marcar \"Enviado\" na mestre: {erro}", text_color=COR_AVISO)
+                self.status.configure(text=f"Não consegui marcar \"Enviado\" na mestre: {erro or type(erro).__name__} "
+                                           f"(detalhes em C:\\Certificados\\Logs)", text_color=COR_AVISO)
 
         em_segundo_plano(self, lambda: mestre_excel.marcar_enviados(mestre, aba, celulas, modelo,
                                                                     log=self.registrar), pronto, falhou)

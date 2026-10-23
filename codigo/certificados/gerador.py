@@ -46,10 +46,10 @@ MODOS = {
 class Log:
     """RegistrarLog: um arquivo por rodada em C:\\Certificados\\Logs."""
 
-    def __init__(self, modo_nome, pasta=r"C:\Certificados\Logs", ecoar=None):
+    def __init__(self, modo_nome, pasta=r"C:\Certificados\Logs", ecoar=None, prefixo="geracao_python"):
         os.makedirs(pasta, exist_ok=True)
         sufixo = "" if modo_nome == "oficial" else f"_{modo_nome.upper()}"
-        self.arquivo = os.path.join(pasta, f"geracao_python{sufixo}_{datetime.now():%Y-%m-%d_%H-%M-%S}.txt")
+        self.arquivo = os.path.join(pasta, f"{prefixo}{sufixo}_{datetime.now():%Y-%m-%d_%H-%M-%S}.txt")
         self.ecoar = ecoar
 
     def __call__(self, msg):

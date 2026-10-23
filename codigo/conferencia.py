@@ -35,8 +35,9 @@ def em_segundo_plano(janela, trabalho, ao_terminar, ao_falhar=None):
         try:
             resultado = trabalho()
         except Exception as e:
+            # o "e" some no fim do except: passa por valor, senão a janela recebe None
             detalhe = traceback.format_exc()
-            janela.after(0, lambda: (ao_falhar or janela.mostrar_erro)(e, detalhe))
+            janela.after(0, lambda erro=e: (ao_falhar or janela.mostrar_erro)(erro, detalhe))
             return
         janela.after(0, lambda: ao_terminar(resultado))
     threading.Thread(target=rodar, daemon=True).start()
