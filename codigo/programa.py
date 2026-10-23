@@ -31,8 +31,10 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
-from certificados import (VERSAO, caminhos, coordenadores, economia, gerador, historico, horas, mestre_excel,
-                          organizar, painel, planilhas, textos)
+from openpyxl.utils import get_column_letter
+
+from certificados import (VERSAO, caminhos, coordenadores, economia, gerador, historico, horas, organizar, painel,
+                          planilhas, textos)
 from certificados.pdf import ConversorPowerPoint, powerpoint_aberto
 import atualizacao
 import tema
@@ -44,6 +46,8 @@ COR_OK, COR_ERRO, COR_AVISO, COR_APAGADO = tema.OK, tema.ERRO, tema.AVISO, tema.
 
 ETAPAS = ["Início", "Coordenadores", "Planilhas e meses", "Conferir dados", "Gerar", "Relatório"]
 GERAR, RELATORIO = 4, 5
+ENVIADO = "Enviado"
+LEMBRETE_MS = 5 * 60 * 1000                # na tela inicial, relê as pastas para ver se o fluxo já arquivou
 CONFIG = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "CertificadosPython", "config.json")
 
 
@@ -470,8 +474,16 @@ class App(ctk.CTk):
     # -- 1. Início: painel, cursos da mestre e data de emissão -------------------
 
     def montar_inicio(self):
+        self.faixa_mestre = ctk.CTkFrame(self.conteudo, fg_color=tema.LATERAL, border_width=2,
+                                         border_color=tema.AVISO)
+        self.rotulo_faixa_mestre = ctk.CTkLabel(self.faixa_mestre, text="", font=(FONTE, 15, "bold"),
+                                                text_color=tema.AVISO, anchor="w")
+        self.rotulo_faixa_mestre.pack(side="left", fill="x", expand=True, padx=16, pady=12)
+        ctk.CTkButton(self.faixa_mestre, text="Ver o que marcar", width=170,
+                      command=self._mostrar_falta_marcar).pack(side="right", padx=(0, 16), pady=12)
         cartoes = ctk.CTkFrame(self.conteudo, fg_color="transparent")
         cartoes.pack(fill="x")
+        self.cartoes_inicio = cartoes
         for i in range(4):
             cartoes.grid_columnconfigure(i, weight=1, uniform="cartao")
         self.rosca_cursos = Rosca(cartoes, "Cursos feitos no mês", tema.OK)
@@ -534,6 +546,7 @@ class App(ctk.CTk):
             self._preencher_meses()
             self._desenhar_cursos()
             self._contar_previstos()
+            self._lembrar_mestre()
         else:
             self._carregar_abas()
         self._atualizar_continuar()
@@ -618,41 +631,77 @@ class App(ctk.CTk):
             self.status.configure(text="")
             self._desenhar_cursos()
             self._contar_previstos()
-        self._marcar_na_mestre()
+        self._lembrar_mestre()
 
-    def _marcar_na_mestre(self):
-        """Ciclo fechado (gerado e já fora da Para Enviar) e célula vazia na mestre: escreve "Enviado"."""
-        candidatos = historico.para_marcar_na_mestre(self.cursos, self.situacoes or {}, self.meses_mestre)
-        if not candidatos or getattr(self, "_marcando", False) or not os.path.isfile(self.mestre or ""):
+    # lembrete de marcar "Enviado" na mestre (o Excel do PC não é licenciado: quem marca é a pessoa)
+
+    def _chave_marcado(self, curso, mes):
+        return "|".join(textos.normalizar(x) for x in (self.aba, curso.sigla_unidade or curso.unidade,
+                                                        curso.posgrad, mes))
+
+    def _falta_marcar(self):
+        """[(curso, pasta_mes, coluna)]: ciclos fechados (enviados e arquivados) com a célula vazia na mestre,
+        tirando os que a pessoa já disse que marcou."""
+        ja = set(self.config_usuario.get("mestre_marcados", []))
+        return [(c, m, col) for c, m, col in
+                historico.para_marcar_na_mestre(self.cursos, self.situacoes or {}, getattr(self, "meses_mestre", []))
+                if self._chave_marcado(c, m) not in ja]
+
+    def _lembrar_mestre(self):
+        if not self._na_inicio():
             return
-        coluna = dict(self.meses_mestre)
-        modelo = next(((c.linha, coluna[m]) for c in self.cursos for m in c.marcas if c.enviado(m) and m in coluna),
-                      None)
-        mestre, aba, cursos = self.mestre, self.aba, self.cursos
-        celulas = [(c.linha, col) for c, _, col in candidatos]
-        self._marcando = True
+        falta = self._falta_marcar() if self.situacoes is not None else []
+        if falta:
+            self.rotulo_faixa_mestre.configure(
+                text=f"✎  Falta escrever \"{ENVIADO}\" na planilha mestre: {len(falta)} curso/mês já enviado(s) "
+                     f"(aba {self.aba})")
+            if not self.faixa_mestre.winfo_ismapped():
+                self.faixa_mestre.pack(fill="x", pady=(0, 16), before=self.cartoes_inicio)
+        else:
+            self.faixa_mestre.pack_forget()
+        if not getattr(self, "_relendo_agendado", False):
+            self._relendo_agendado = True
+            self.after(LEMBRETE_MS, self._reler_situacao)
 
-        def pronto(escritas):
-            self._marcando = False
-            if cursos is not self.cursos:
-                return
-            for c, m, _ in candidatos:
-                c.marcas.setdefault(m, mestre_excel.TEXTO)
-            if self._na_inicio():
-                self._desenhar_cursos()
-                if escritas:
-                    self.status.configure(text=f"✓ Marquei \"Enviado\" em {escritas} curso/mês na planilha mestre.",
-                                          text_color=COR_OK)
+    def _reler_situacao(self):
+        """De tempos em tempos, na tela inicial: o fluxo pode ter arquivado um lote depois que o programa abriu."""
+        self._relendo_agendado = False
+        if not self._na_inicio() or self._ocupado or not self.cursos or self.situacoes is None:
+            self._relendo_agendado = True
+            self.after(LEMBRETE_MS, self._reler_situacao)
+            return
+        cursos, locais = self.cursos, self.locais
+        em_segundo_plano(self, lambda: historico.situacao(locais, cursos),
+                         lambda s: self._situacao_carregada(cursos, s),
+                         lambda e, d: self.registrar(f"Histórico não relido: {e}"))
 
-        def falhou(erro, detalhe):
-            self._marcando = False
-            self.registrar(f"Mestre não marcada: {erro}\n{detalhe}")
-            if self._na_inicio():
-                self.status.configure(text=f"Não consegui marcar \"Enviado\" na mestre: {erro or type(erro).__name__} "
-                                           f"(detalhes em C:\\Certificados\\Logs)", text_color=COR_AVISO)
-
-        em_segundo_plano(self, lambda: mestre_excel.marcar_enviados(mestre, aba, celulas, modelo,
-                                                                    log=self.registrar), pronto, falhou)
+    def _mostrar_falta_marcar(self):
+        falta = self._falta_marcar()
+        if not falta:
+            self._lembrar_mestre()
+            return
+        d = Dialogo(self, f"Marcar \"{ENVIADO}\" na planilha mestre",
+                    f"Estes cursos já foram enviados e arquivados pelo fluxo, mas a célula do mês ainda está vazia "
+                    f"na mestre (aba {self.aba}). Abra a mestre no Excel do navegador, escreva \"{ENVIADO}\" em "
+                    f"cada célula abaixo e depois clique em \"Já marquei\". Até lá, este aviso continua aparecendo.",
+                    [("Depois", False), ("Já marquei", True)], largura=760)
+        quadro, arvore = tabela(d.corpo, [("celula", "Célula", 70), ("mes", "Mês", 70), ("uni", "Unidade", 120),
+                                          ("curso", "Curso", 440)], alturas=min(12, max(4, len(falta))))
+        quadro.pack(fill="both", expand=True)
+        for c, m, col in sorted(falta, key=lambda x: (x[2], x[0].linha)):
+            arvore.insert("", "end", values=(f"{get_column_letter(col)}{c.linha}", painel.curto(m),
+                                             c.sigla_unidade or c.unidade or "—", c.posgrad))
+        self.wait_window(d)
+        if d.escolha is True:
+            ja = self.config_usuario.setdefault("mestre_marcados", [])
+            for c, m, _ in falta:
+                ja.append(self._chave_marcado(c, m))
+                c.marcas.setdefault(m, ENVIADO)
+            gravar_config(self.config_usuario)
+            self.registrar(f"Pessoa marcou \"{ENVIADO}\" na mestre: " +
+                           "; ".join(f"{c.posgrad} {m}" for c, m, _ in falta))
+            self._desenhar_cursos()
+            self._lembrar_mestre()
 
     # mês do painel
 
@@ -767,7 +816,7 @@ class App(ctk.CTk):
             elif not feito and (estado == "outro" or previsto == 0):
                 cert, cor = c.marcas.get(mes, "") or "sem aulas", tema.APAGADO
             elif feito and previstos is None and pdfs_conhecidos is None:
-                cert, cor = mestre_excel.TEXTO, tema.OK
+                cert, cor = ENVIADO, tema.OK
             else:
                 total = max(previsto or 0, pdfs)
                 cert = f"{pdfs} de {total}" if previstos is not None else f"{pdfs} feitos"
@@ -1442,7 +1491,8 @@ class App(ctk.CTk):
             tema.quebrar_na_largura(ctk.CTkLabel(self.conteudo, justify="left", anchor="w", text_color=tema.TEXTO_2, text=(
                 "Agora o fluxo do Power Automate manda os e-mails para os docentes em alguns minutos e depois "
                 "arquiva os PDFs em Declarações\\<Semestre>\\<Local>\\<Pós>\\<Mês>. A cópia de segurança fica em "
-                f"{self.modo.pasta_local}."))).pack(fill="x", pady=(0, 10))
+                f"{self.modo.pasta_local}. Quando o fluxo terminar, a tela inicial vai lembrar você de escrever "
+                f"\"{ENVIADO}\" na planilha mestre nesses cursos."))).pack(fill="x", pady=(0, 10))
         quadro, arvore = tabela(self.conteudo, [("curso", "Curso", 340), ("gerados", "Gerados", 90),
                                                 ("ignorados", "Ignorados", 90), ("sit", "Situação", 360)], alturas=8)
         quadro.pack(fill="both", expand=True)
