@@ -193,8 +193,9 @@ class App(ctk.CTk):
         linha.pack(fill="x", padx=32, pady=(12, 4))
         ctk.CTkLabel(linha, text="Certificados · Pós-graduação", font=(FONTE, 20, "bold"),
                      text_color=tema.TITULO).pack(side="left")
-        ctk.CTkLabel(linha, text=f"versão {VERSAO}", text_color=COR_APAGADO, font=(FONTE, 12)).pack(
-            side="left", padx=14)
+        self.rotulo_versao = ctk.CTkLabel(linha, text=f"versão {VERSAO} · procurando atualização…",
+                                          text_color=COR_APAGADO, font=(FONTE, 12))
+        self.rotulo_versao.pack(side="left", padx=14)
         self.seletor_modo = ctk.CTkSegmentedButton(linha, values=["Teste", "Oficial"], command=self._trocar_modo,
                                                    width=200, height=34)
         self.seletor_modo.set(self.modo.rotulo)
@@ -206,7 +207,7 @@ class App(ctk.CTk):
                                              hover_color="#1f4d40", text_color=tema.OK, font=(FONTE, 13, "bold"))
         # Só depois que a janela abriu (a resposta volta para a janela, que precisa estar rodando).
         self.after(2000, lambda: em_segundo_plano(self, lambda: atualizacao.versao_mais_nova(VERSAO),
-                                                  self._versao_nova, lambda e, d: None))
+                                                  self._versao_nova, self._versao_sem_resposta))
         if self.locais.declaracoes:
             declaracoes = self.locais.declaracoes
             self.after(2500, lambda: em_segundo_plano(
@@ -237,10 +238,17 @@ class App(ctk.CTk):
         self.status.pack(side="left", fill="x", expand=True, padx=16)
         self._aplicar_modo()
 
+    def _versao_sem_resposta(self, erro, detalhe):
+        self.rotulo_versao.configure(text=f"versão {VERSAO} · não consegui verificar se há atualização",
+                                     text_color=tema.AVISO)
+        self.registrar(f"Não consegui consultar a versão nova no GitHub: {erro}")
+
     def _versao_nova(self, resultado):
         if not resultado:
+            self.rotulo_versao.configure(text=f"versão {VERSAO} · ✓ é a mais nova", text_color=tema.OK)
             return
         versao, link = resultado
+        self.rotulo_versao.configure(text=f"versão {VERSAO}")
         self.botao_atualizar.configure(text=f"Versão {versao} disponível · baixar",
                                        command=lambda: webbrowser.open(link))
         self.botao_atualizar.pack(side="right", padx=(0, 4))
