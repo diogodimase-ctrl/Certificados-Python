@@ -6,6 +6,7 @@ ObterOneDriveEinstein / ObterCaminhosCompartilhados / LocalizarPlanilhaCursoDina
 
 import glob
 import os
+import re
 from dataclasses import dataclass
 
 from . import textos
@@ -124,6 +125,33 @@ def localizar_planilha_do_curso(raiz, nome_curso, unidade="", semestre=""):
             if criterio(n):
                 return arq
     return ""
+
+
+def pasta_da_pos(pasta_sigla, posgrad, codigo):
+    """Nome da pasta da pós dentro de Declarações\\<semestre>\\<sigla>, sem criar
+    pastas paralelas: 1º usa a que já existe como "<Pós> (<código>)"; 2º a que
+    já existe só como "<Pós>"; senão, o nome novo é "<Pós> (<código>)".
+    A comparação ignora maiúsculas e acentos (devolve o nome como está na pasta)."""
+    pos = textos.sanitizar_nome_arquivo(posgrad)
+    codigo = textos.sanitizar_nome_arquivo(codigo) if str(codigo or "").strip() else ""
+    com_codigo = f"{pos} ({codigo})" if codigo else pos
+    try:
+        existentes = [n for n in os.listdir(pasta_sigla) if os.path.isdir(os.path.join(pasta_sigla, n))]
+    except OSError:
+        existentes = []
+    for procurado in (com_codigo, pos):
+        alvo = textos.normalizar(procurado)
+        for nome in existentes:
+            if textos.normalizar(nome) == alvo:
+                return nome
+    return com_codigo
+
+
+def separar_codigo(nome_pasta):
+    """"Medicina da Dor (2026-A-CEP-1S)" -> ("Medicina da Dor", "2026-A-CEP-1S");
+    sem código da turma no fim -> (nome, "")."""
+    m = re.match(r"^(.*?)\s*\((\d{4}-[^()]+)\)\s*$", nome_pasta or "")
+    return (m.group(1).strip(), m.group(2).strip()) if m else ((nome_pasta or "").strip(), "")
 
 
 def caminho_unico(pasta, nome_base, extensao):

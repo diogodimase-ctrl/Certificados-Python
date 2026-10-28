@@ -12,9 +12,10 @@ Primeiro planejar() mostra o que vai para onde; só mover() mexe nos arquivos.
 import os
 import re
 import shutil
+import time
 from dataclasses import dataclass
 
-from . import textos
+from . import caminhos, textos
 
 PASTA_ENVIADOS = "Enviados"
 
@@ -48,8 +49,8 @@ def _destino(declaracoes, nome_pasta_curso, mes):
     semestre = textos.semestre_da_turma("", codigo)
     if not semestre or not sigla or sigla == codigo:
         return "", f"não entendi o código da turma '{codigo}'"
-    pasta_pos = textos.sanitizar_nome_arquivo(pos)
-    return os.path.join(declaracoes, semestre, textos.sanitizar_nome_arquivo(sigla), pasta_pos, mes), ""
+    pasta_sigla = os.path.join(declaracoes, semestre, textos.sanitizar_nome_arquivo(sigla))
+    return os.path.join(pasta_sigla, caminhos.pasta_da_pos(pasta_sigla, pos, codigo), mes), ""
 
 
 def planejar(declaracoes):
@@ -72,6 +73,28 @@ def planejar(declaracoes):
             destino, problema = _destino(declaracoes, curso, mes)
             plano.append(Movimento(origem, destino, pdfs, problema))
     return plano
+
+
+def limpar_para_enviar(declaracoes, log=print, minutos=30, agora=None):
+    """Apaga as pastas de curso VAZIAS da Para Enviar. O fluxo, depois de mover
+    os PDFs, apaga só a pasta do mês e a do curso fica para trás. Só sai a que
+    está vazia (nem subpasta) e parada há "minutos" (uma pasta recém-criada pode
+    estar no meio da sincronização). A exclusão vai para a Lixeira do site.
+    Devolve os nomes apagados."""
+    para_enviar = os.path.join(declaracoes, "Para Enviar")
+    agora = agora or time.time()
+    apagadas = []
+    for nome in _listar(para_enviar):
+        pasta = os.path.join(para_enviar, nome)
+        try:
+            if not os.path.isdir(pasta) or _listar(pasta) or agora - os.path.getmtime(pasta) < minutos * 60:
+                continue
+            os.rmdir(pasta)
+            apagadas.append(nome)
+            log(f"Para Enviar: pasta vazia apagada — {nome}")
+        except OSError as e:
+            log(f"Para Enviar: não consegui apagar a pasta vazia {nome}: {e}")
+    return apagadas
 
 
 def mover(plano, log=print):

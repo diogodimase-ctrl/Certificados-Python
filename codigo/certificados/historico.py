@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from . import textos
+from . import caminhos, textos
 
 PASTA_HISTORICO = "_Programa Certificados"
 PASTA_ANTIGAS = "Antigas"
@@ -124,7 +124,7 @@ def _pdfs(pasta):
 
 
 def arquivados(locais):
-    """{chave_curso: {pastaMes: (datetime, nº de PDFs)}} das pastas que o fluxo arquivou:
+    """{(sigla, pós, código da turma): {pastaMes: (datetime, nº de PDFs)}} das pastas que o fluxo arquivou:
     Declarações\\<AAAA-5 ou AAAA-6>\\... e também dentro de Declarações\\Antigas."""
     achados = {}
     for raiz in (locais.declaracoes, os.path.join(locais.declaracoes, PASTA_ANTIGAS)):
@@ -149,7 +149,10 @@ def _arquivados_em(raiz, achados):
                         quando = datetime.fromtimestamp(os.path.getmtime(pasta))
                     except OSError:
                         quando = None
-                    achados.setdefault((textos.normalizar(sigla), textos.normalizar(pos)), {})[mes] = (quando, n)
+                    # A pasta da pós pode ser "<Pós> (<código>)" ou só "<Pós>" (código "").
+                    nome_pos, codigo = caminhos.separar_codigo(pos)
+                    chave = (textos.normalizar(sigla), textos.normalizar(nome_pos), textos.normalizar(codigo))
+                    achados.setdefault(chave, {})[mes] = (quando, n)
     return achados
 
 
@@ -175,7 +178,11 @@ def situacao(locais, cursos):
     for c in cursos:
         chave = chave_curso(c.sigla_unidade or c.unidade, c.posgrad)
         meses = {}
-        for mes, (quando, n) in arquivo.get(chave, {}).items():
+        # Pasta só com o nome da pós vale para qualquer turma; com o código, só para a dela.
+        da_pos = dict(arquivo.get(chave + ("",), {}))
+        if c.unidade:
+            da_pos.update(arquivo.get(chave + (textos.normalizar(c.unidade),), {}))
+        for mes, (quando, n) in da_pos.items():
             meses[mes] = MesProcessado(mes, rotulo_mes(mes), quando.strftime("%d/%m") if quando else "", False, n)
         envio = CursoNoLote(c).nome_com_unidade
         for h in por_curso.get(chave, []):

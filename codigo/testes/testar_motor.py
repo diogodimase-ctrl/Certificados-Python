@@ -13,6 +13,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -214,7 +215,8 @@ def geracao_oficial():
         igual(list(m)[:4], ["versaoManifesto", "loteId", "dataGeracao", "curso"])
         igual((m["curso"], m["local"], m["nomeAba"], m["semestre"], m["pastaMes"]),
               ("Cardiologia Clínica", "PTA", "Abril26", "2026-5", "04.26"))
-        igual(m["pastaDestino"], "2026-5/PTA/Cardiologia Clínica/04.26")
+        igual((m["pastaDestino"], m["pastaPos"]),
+              ("2026-5/PTA/Cardiologia Clínica (2026-A-PTA-1S)/04.26", "Cardiologia Clínica (2026-A-PTA-1S)"))
         igual(len(m["arquivosDoLote"]), 5)
         maria = next(d for d in m["certificados"] if d["docente"] == "Maria Exemplo")
         igual([a["nomeArquivo"] for a in maria["arquivos"]],
@@ -393,13 +395,13 @@ def organizar_pasta_enviados():
         pdf("2026-5", "CEP", "Cardiologia", "04.26", "Bia.pdf", conteudo="outro")  # já estava, diferente
         plano = organizar.planejar(decl)
         igual(sorted((os.path.relpath(m.destino, decl) if m.destino else "", m.pdfs, bool(m.problema)) for m in plano),
-              [("", 1, True), (os.path.join("2025-6", "RJ", "Medicina da Dor", "10.25"), 1, False),
+              [("", 1, True), (os.path.join("2025-6", "RJ", "Medicina da Dor (2025-B-RJ-2S)", "10.25"), 1, False),
                (os.path.join("2026-5", "CEP", "Cardiologia", "04.26"), 2, False)])
         movidos, erros = organizar.mover(plano, log=lambda m: None)
         igual((movidos, erros), (2, []))
         destino = os.path.join(decl, "2026-5", "CEP", "Cardiologia", "04.26")
         igual(sorted(os.listdir(destino)), ["Ana.pdf", "Bia (Enviados).pdf", "Bia.pdf"])
-        assert os.path.isfile(os.path.join(decl, "2025-6", "RJ", "Medicina da Dor", "10.25", "Caio.pdf"))
+        assert os.path.isfile(os.path.join(decl, "2025-6", "RJ", "Medicina da Dor (2025-B-RJ-2S)", "10.25", "Caio.pdf"))
         # O que não é PDF fica; a pasta sem destino fica; a pasta vazia sai.
         assert os.path.isfile(os.path.join(decl, "Enviados", "Cardiologia (2026-A-CEP-1S)", "04.26", "manifesto.txt"))
         assert os.path.isfile(os.path.join(decl, "Enviados", "Sem Codigo", "04.26", "Davi.pdf"))
@@ -408,8 +410,56 @@ def organizar_pasta_enviados():
         os.makedirs(os.path.join(decl, "Antigas"))
         shutil.move(os.path.join(decl, "2025-6"), os.path.join(decl, "Antigas", "2025-6"))
         achados = historico.arquivados(type("Locais", (), {"declaracoes": decl})())
-        assert "10.25" in achados[(textos.normalizar("RJ"), textos.normalizar("Medicina da Dor"))]
-        assert "04.26" in achados[(textos.normalizar("CEP"), textos.normalizar("Cardiologia"))]
+        assert "10.25" in achados[("rj", "medicina da dor", "2025-b-rj-2s")]
+        assert "04.26" in achados[("cep", "cardiologia", "")]
+    finally:
+        shutil.rmtree(decl, ignore_errors=True)
+
+
+@teste
+def pasta_da_pos_sem_duplicar():
+    decl = tempfile.mkdtemp()
+    try:
+        sigla = os.path.join(decl, "2026-5", "CEP")
+        # 3) nada existe: cria no modelo "<Pós> (<código>)"
+        igual(caminhos.pasta_da_pos(sigla, "Medicina da Dor", "2026-A-CEP-1S"), "Medicina da Dor (2026-A-CEP-1S)")
+        # 2) só existe a pasta com o nome da pós: usa ela
+        os.makedirs(os.path.join(sigla, "medicina da dor"))
+        igual(caminhos.pasta_da_pos(sigla, "Medicina da Dor", "2026-A-CEP-1S"), "medicina da dor")
+        # 1) existe com o código (acento/maiúscula diferentes): ela ganha da só-nome
+        os.makedirs(os.path.join(sigla, "Medicina da DOR (2026-a-cep-1s)"))
+        igual(caminhos.pasta_da_pos(sigla, "Medicina da Dor", "2026-A-CEP-1S"), "Medicina da DOR (2026-a-cep-1s)")
+        # outra turma da mesma pós não pega a pasta com código de outra turma
+        igual(caminhos.pasta_da_pos(sigla, "Medicina da Dor", "2026-B-CEP-1S"), "medicina da dor")
+        igual(caminhos.separar_codigo("Enfermagem (UTI)"), ("Enfermagem (UTI)", ""))
+        igual(caminhos.separar_codigo("Medicina da Dor (2026-A-CEP-1S)"), ("Medicina da Dor", "2026-A-CEP-1S"))
+
+        # As barrinhas acham as duas formas de pasta.
+        for pos, n in (("Medicina da Dor (2026-A-CEP-1S)", "09.26"), ("medicina da dor", "10.26"),
+                       ("Medicina da Dor (2026-B-CEP-1S)", "11.26")):
+            os.makedirs(os.path.join(sigla, pos, n), exist_ok=True)
+            open(os.path.join(sigla, pos, n, "a.pdf"), "w").close()
+        locais = type("Locais", (), {"declaracoes": decl})()
+        curso = planilhas.Curso(2, "", "Medicina da Dor", "2026-A-CEP-1S", "CEP", "", "2026-1S")
+        igual([m.pasta_mes for m in historico.situacao(locais, [curso])[2]], ["09.26", "10.26"])
+    finally:
+        shutil.rmtree(decl, ignore_errors=True)
+
+
+@teste
+def limpar_pastas_vazias_da_para_enviar():
+    from certificados import organizar
+    decl = tempfile.mkdtemp()
+    try:
+        pe = os.path.join(decl, "Para Enviar")
+        os.makedirs(os.path.join(pe, "Vazia (2026-A-CEP-1S)"))
+        os.makedirs(os.path.join(pe, "Com lote (2026-A-PTA-2S)", "10.26"))
+        os.makedirs(os.path.join(pe, "Recém-criada (2026-A-RJ-1S)"))
+        velho = time.time() - 3600
+        for n in ("Vazia (2026-A-CEP-1S)", "Com lote (2026-A-PTA-2S)"):
+            os.utime(os.path.join(pe, n), (velho, velho))
+        igual(organizar.limpar_para_enviar(decl, log=lambda m: None), ["Vazia (2026-A-CEP-1S)"])
+        igual(sorted(os.listdir(pe)), ["Com lote (2026-A-PTA-2S)", "Recém-criada (2026-A-RJ-1S)"])
     finally:
         shutil.rmtree(decl, ignore_errors=True)
 

@@ -267,11 +267,11 @@ def _gerar_aba(c, aba, base, locais, modo, conversor, log, email_teste, res, rel
             doc["email"], doc["email_valido"] = r.email, True
         doc["arquivos"].append({"nomeArquivo": nome_arquivo, "chaveLinha": f"{r.data_aula}|{r.horario_txt}"})
 
-    _gravar_manifesto(c, aba, mes, pasta_envio or pasta_local, docentes, arquivos_do_lote, modo, email_teste, log, rel)
+    _gravar_manifesto(c, aba, mes, pasta_envio or pasta_local, locais, docentes, arquivos_do_lote, modo, email_teste, log, rel)
     return feitos
 
 
-def _gravar_manifesto(c, aba, mes, pasta, docentes, arquivos_do_lote, modo, email_teste, log, rel):
+def _gravar_manifesto(c, aba, mes, pasta, locais, docentes, arquivos_do_lote, modo, email_teste, log, rel):
     """GerarManifestoDoMes."""
     if not arquivos_do_lote:
         return
@@ -281,10 +281,12 @@ def _gravar_manifesto(c, aba, mes, pasta, docentes, arquivos_do_lote, modo, emai
     local = c.curso.sigla_unidade or c.curso.unidade
     # Pasta do semestre da TURMA ("2026-5"); sem dado da turma, o semestre do mês.
     semestre = c.curso.semestre or textos.semestre_da_turma(textos.semestre_do_mes(mes))
-    pasta_pos = textos.sanitizar_nome_arquivo(c.curso.posgrad)
     pasta_local_sigla = textos.sanitizar_nome_arquivo(local) if local.strip() else ""
+    pasta_pos = textos.sanitizar_nome_arquivo(c.curso.posgrad)
     destino = ""
     if semestre and pasta_local_sigla:
+        pasta_sigla = os.path.join(locais.declaracoes, *f"{modo.destino_prefixo}{semestre}/{pasta_local_sigla}".split("/"))
+        pasta_pos = caminhos.pasta_da_pos(pasta_sigla, c.curso.posgrad, c.curso.unidade)
         destino = f"{modo.destino_prefixo}{semestre}/{pasta_local_sigla}/{pasta_pos}/{mes}"
     else:
         log(f"AVISO: sem pasta de destino para {c.curso.posgrad} / {aba.aba} (semestre='{semestre}', local='{local}').")

@@ -207,6 +207,13 @@ class App(ctk.CTk):
         # Só depois que a janela abriu (a resposta volta para a janela, que precisa estar rodando).
         self.after(2000, lambda: em_segundo_plano(self, lambda: atualizacao.versao_mais_nova(VERSAO),
                                                   self._versao_nova, lambda e, d: None))
+        if self.locais.declaracoes:
+            declaracoes = self.locais.declaracoes
+            self.after(2500, lambda: em_segundo_plano(
+                self, lambda: organizar.limpar_para_enviar(declaracoes, log=lambda m: None),
+                lambda apagadas: apagadas and self.registrar(
+                    f"Para Enviar: {len(apagadas)} pasta(s) de curso vazia(s) apagada(s): {', '.join(apagadas)}"),
+                lambda e, d: self.registrar(f"Limpeza da Para Enviar falhou: {e}")))
         self.etapas = Etapas(topo, ETAPAS)
         self.etapas.pack(fill="x", padx=24)
         linha = ctk.CTkFrame(topo, fg_color="transparent")
