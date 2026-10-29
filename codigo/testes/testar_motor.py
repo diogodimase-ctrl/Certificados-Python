@@ -524,6 +524,11 @@ def tempo_economizado():
         igual(r.manual, 33 * 693)
         igual(r.economizado, 33 * 693 - 340)
         igual((economia.duracao(3725), economia.duracao(95), economia.duracao(7)), ("1 h 02 min", "1 min 35 s", "7 s"))
+        # correção avulsa: conta como certificado (7 min 33 s no manual), não como rodada
+        assert economia.registrar(1, 60, arquivo, tipo="correcao")
+        r = economia.resumo(arquivo)
+        igual((r.rodadas, r.correcoes, r.certificados, r.programa), (2, 1, 34, 400.0))
+        igual(r.manual, 33 * 693 + 453)
     finally:
         shutil.rmtree(pasta, ignore_errors=True)
 

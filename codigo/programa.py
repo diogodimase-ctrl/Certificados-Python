@@ -40,7 +40,7 @@ import atualizacao
 import tema
 from componentes import BarrasTempo, Etapas, PlanilhaCursos, Rosca
 from conferencia import em_segundo_plano, linha_de_arquivo
-from tela_correcao import JanelaCorrecao
+from tela_correcao import TelaCorrecao
 from tema import FONTE, tabela
 
 COR_OK, COR_ERRO, COR_AVISO, COR_APAGADO = tema.OK, tema.ERRO, tema.AVISO, tema.APAGADO
@@ -204,8 +204,9 @@ class App(ctk.CTk):
         self.chip_arquivos = ctk.CTkButton(linha, text="", height=32, corner_radius=16, font=(FONTE, 13, "bold"),
                                            command=self.abrir_configuracoes)
         self.chip_arquivos.pack(side="right", padx=12)
-        ctk.CTkButton(linha, text="✎  Corrigir um certificado", height=32, corner_radius=16, font=(FONTE, 13, "bold"),
-                      **tema.BOTAO_CONTORNO, command=self.abrir_correcao).pack(side="right")
+        self.botao_tela = ctk.CTkButton(linha, text=self.TEXTO_IR_CORRECAO, height=32, corner_radius=16,
+                                        font=(FONTE, 13, "bold"), **tema.BOTAO_CONTORNO, command=self.trocar_tela)
+        self.botao_tela.pack(side="right")
         self.botao_atualizar = ctk.CTkButton(linha, text="", height=32, fg_color=tema.OK_FUNDO,
                                              hover_color="#1f4d40", text_color=tema.OK, font=(FONTE, 13, "bold"))
         # Só depois que a janela abriu (a resposta volta para a janela, que precisa estar rodando).
@@ -218,18 +219,25 @@ class App(ctk.CTk):
                 lambda apagadas: apagadas and self.registrar(
                     f"Para Enviar: {len(apagadas)} pasta(s) de curso vazia(s) apagada(s): {', '.join(apagadas)}"),
                 lambda e, d: self.registrar(f"Limpeza da Para Enviar falhou: {e}")))
-        self.etapas = Etapas(topo, ETAPAS)
+        # Duas telas na mesma janela: a rodada do mês (etapas + conteúdo + rodapé) e a correção avulsa.
+        self.topo_etapas = ctk.CTkFrame(topo, fg_color="transparent")
+        self.topo_etapas.pack(fill="x")
+        self.etapas = Etapas(self.topo_etapas, ETAPAS)
         self.etapas.pack(fill="x", padx=24)
-        linha = ctk.CTkFrame(topo, fg_color="transparent")
+        linha = ctk.CTkFrame(self.topo_etapas, fg_color="transparent")
         linha.pack(fill="x", padx=32, pady=(0, 12))
         self.rotulo_etapa = ctk.CTkLabel(linha, text="", text_color=tema.TEXTO_2, font=(FONTE, 13))
         self.rotulo_etapa.pack(side="right", padx=(12, 0))
         self.barra_etapas = ctk.CTkProgressBar(linha, height=6)
         self.barra_etapas.pack(side="left", fill="x", expand=True)
+        self.tela_rodada = ctk.CTkFrame(self, fg_color="transparent")
+        self.tela_rodada.pack(fill="both", expand=True)
+        self.tela_correcao = None                                 # montada na primeira vez que abrir
+        self.na_correcao = False
 
-        rodape = ctk.CTkFrame(self, fg_color="transparent")       # antes do conteúdo: em tela baixa não some
+        rodape = ctk.CTkFrame(self.tela_rodada, fg_color="transparent")  # antes do conteúdo: em tela baixa não some
         rodape.pack(side="bottom", fill="x", padx=32, pady=12)
-        self.conteudo = ctk.CTkFrame(self, fg_color="transparent")
+        self.conteudo = ctk.CTkFrame(self.tela_rodada, fg_color="transparent")
         self.conteudo.pack(fill="both", expand=True, padx=32, pady=(14, 0))
         self.botao_voltar = ctk.CTkButton(rodape, text="← Voltar", width=120, **tema.BOTAO_CONTORNO,
                                            command=self.voltar)
@@ -313,13 +321,28 @@ class App(ctk.CTk):
             self.chip_arquivos.configure(text="✓  Arquivos e pastas ok", fg_color=tema.OK_FUNDO,
                                          hover_color="#1f4d40", text_color=tema.OK)
 
-    def abrir_correcao(self):
-        janela = getattr(self, "janela_correcao", None)
-        if janela is not None and janela.winfo_exists():
-            janela.lift()
-            janela.focus_force()
+    TEXTO_IR_CORRECAO = "✎  Corrigir um certificado"
+    TEXTO_IR_RODADA = "←  Voltar aos certificados do mês"
+
+    def trocar_tela(self):
+        """Alterna entre a rodada do mês e a correção avulsa. As duas ficam vivas:
+        voltar não perde a etapa da rodada nem o que estava no formulário."""
+        self.na_correcao = not self.na_correcao
+        if not self.na_correcao:
+            self.tela_correcao.pack_forget()
+            self.topo_etapas.pack(fill="x")
+            self.tela_rodada.pack(fill="both", expand=True)
+            self.botao_tela.configure(text=self.TEXTO_IR_CORRECAO)
+            if self.etapa == 0 and self.barras_tempo.winfo_exists():   # a correção pode ter somado tempo
+                self.barras_tempo.mostrar(economia.resumo())
             return
-        self.janela_correcao = JanelaCorrecao(self)
+        if self.tela_correcao is None:
+            self.tela_correcao = TelaCorrecao(self, self)
+        self.topo_etapas.pack_forget()
+        self.tela_rodada.pack_forget()
+        self.tela_correcao.pack(fill="both", expand=True)
+        self.botao_tela.configure(text=self.TEXTO_IR_RODADA)
+        self.tela_correcao.mostrar()
 
     def abrir_configuracoes(self):
         d = Dialogo(self, "Arquivos e configurações",

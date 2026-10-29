@@ -1,56 +1,73 @@
 """
-Janela "Corrigir um certificado" (era o Gerar_Manual_v1 do AHK).
+Tela "Corrigir um certificado" (era o Gerar_Manual_v1 do AHK), dentro da
+janela do programa: o botão do cabeçalho troca entre ela e a rodada do mês.
 
 À esquerda, a busca: em quais cursos do semestre aparece o docente (nome e,
-se quiser, a data). Ela só mostra; o formulário da direita é preenchido à mão.
+se quiser, a data). "Preencher com os dados encontrados" copia a linha
+escolhida para o formulário da direita, que dá para corrigir antes de gerar.
 O PDF sai em C:\\Certificados\\Correções\\<MM.AA>; nada é enviado.
+Cada PDF gerado conta no tempo economizado da tela Início.
 """
 
 import os
+import time
 from datetime import date
 from tkinter import filedialog
 
 import customtkinter as ctk
 
 import tema
-from certificados import coordenadores, correcao
+from certificados import coordenadores, correcao, economia
 from certificados.pdf import ConversorPowerPoint
 from conferencia import em_segundo_plano
 from tema import FONTE
 
 
-class JanelaCorrecao(ctk.CTkToplevel):
+LIMITE_TEMPO = 30 * 60      # tela esquecida aberta não vira "tempo do programa"
 
-    def __init__(self, app):
-        super().__init__(app)
+
+class TelaCorrecao(ctk.CTkFrame):
+
+    def __init__(self, pai, app):
+        super().__init__(pai, fg_color="transparent")
         self.app = app
-        self.title("Corrigir um certificado")
-        self.geometry("1280x760")
-        self.minsize(1100, 680)
-        self.transient(app)
-        self.guardadas = {}           # planilhas já lidas nesta janela
+        self.guardadas = {}           # planilhas já lidas nesta sessão
         self.achados = []
         self.ocupada = False
+        self.inicio = None            # relógio desta correção (primeiro clique até o PDF)
         self.cadastro = coordenadores.Cadastro(app.locais.assinaturas, log=app.registrar)
 
         ctk.CTkLabel(self, text="Corrigir um certificado", font=(FONTE, 20, "bold"), text_color=tema.TITULO,
-                     anchor="w").pack(fill="x", padx=24, pady=(16, 0))
-        ctk.CTkLabel(self, text="Gera um certificado avulso, com os dados digitados à mão. Só gera o PDF: "
-                                "nada é enviado e nada vai para o SharePoint.",
-                     text_color=tema.TEXTO_2, anchor="w").pack(fill="x", padx=24, pady=(2, 10))
+                     anchor="w").pack(fill="x", padx=32, pady=(16, 0))
+        ctk.CTkLabel(self, text="Gera um certificado avulso. Só gera o PDF: nada é enviado e nada vai para o "
+                                "SharePoint.",
+                     text_color=tema.TEXTO_2, anchor="w").pack(fill="x", padx=32, pady=(2, 10))
         corpo = ctk.CTkFrame(self, fg_color="transparent")
-        corpo.pack(fill="both", expand=True, padx=24, pady=(0, 16))
+        corpo.pack(fill="both", expand=True, padx=32, pady=(0, 16))
         corpo.grid_columnconfigure(0, weight=5, uniform="c")
         corpo.grid_columnconfigure(1, weight=4, uniform="c")
         corpo.grid_rowconfigure(0, weight=1)
         self._montar_busca(corpo)
         self._montar_formulario(corpo)
-        self.after(150, self._mostrar)
 
-    def _mostrar(self):
-        self.lift()
-        self.focus_force()
-        self.ent_busca_nome.focus_set()
+    def mostrar(self):
+        """Chamado toda vez que a tela aparece: a aba da mestre pode ter mudado."""
+        aba = self.app.aba or "—"
+        self.lbl_aba.configure(text=f"Procura nas planilhas dos cursos da aba {aba} da mestre, em todos os meses.")
+        if self.app.cursos:
+            if not self.ocupada:
+                self.btn_procurar.configure(state="normal")
+            if "abra a mestre" in self.status_busca.cget("text"):
+                self.status_busca.configure(text="")
+        else:
+            self.status_busca.configure(text="Para procurar, abra a mestre na tela Início (aba do semestre). "
+                                             "O formulário ao lado funciona mesmo assim.", text_color=tema.AVISO)
+            self.btn_procurar.configure(state="disabled")
+        self.after(50, self.ent_busca_nome.focus_set)
+
+    def _comecou(self, *_):
+        if self.inicio is None:
+            self.inicio = time.monotonic()
 
     # -- busca --------------------------------------------------------------
 
@@ -59,10 +76,9 @@ class JanelaCorrecao(ctk.CTkToplevel):
         caixa.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         ctk.CTkLabel(caixa, text="1. Procurar o docente nos cursos", font=(FONTE, 15, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(14, 2))
-        aba = self.app.aba or "—"
-        ctk.CTkLabel(caixa, text=f"Procura nas planilhas dos cursos da aba {aba} da mestre, em todos os meses. "
-                                 "Só mostra: copie o que precisar para o formulário.",
-                     text_color=tema.APAGADO, anchor="w", justify="left", wraplength=620).pack(fill="x", padx=16)
+        self.lbl_aba = ctk.CTkLabel(caixa, text="", text_color=tema.APAGADO, anchor="w", justify="left",
+                                    wraplength=620)
+        self.lbl_aba.pack(fill="x", padx=16)
 
         linha = ctk.CTkFrame(caixa, fg_color="transparent")
         linha.pack(fill="x", padx=16, pady=(10, 6))
@@ -74,8 +90,10 @@ class JanelaCorrecao(ctk.CTkToplevel):
         self.btn_procurar.pack(side="left")
         for ent in (self.ent_busca_nome, self.ent_busca_data):
             ent.bind("<Return>", lambda e: self._procurar())
+            ent.bind("<Key>", self._comecou, add="+")
 
-        self.status_busca = ctk.CTkLabel(caixa, text="", text_color=tema.TEXTO_2, anchor="w", justify="left")
+        self.status_busca = ctk.CTkLabel(caixa, text="", text_color=tema.TEXTO_2, anchor="w", justify="left",
+                                         wraplength=620)
         self.status_busca.pack(fill="x", padx=16)
         self.barra_busca = ctk.CTkProgressBar(caixa, height=6)
         self.barra_busca.set(0)
@@ -84,19 +102,19 @@ class JanelaCorrecao(ctk.CTkToplevel):
         detalhe_quadro.pack(side="bottom", fill="x", padx=16, pady=(6, 14))
         ctk.CTkLabel(detalhe_quadro, text="Linha escolhida (dá para selecionar e copiar):", text_color=tema.APAGADO,
                      anchor="w").pack(fill="x")
-        self.detalhe = ctk.CTkTextbox(detalhe_quadro, height=150, font=(FONTE, 13), wrap="word")
+        self.detalhe = ctk.CTkTextbox(detalhe_quadro, height=130, font=(FONTE, 13), wrap="word")
         self.detalhe.pack(fill="x")
         self.detalhe.configure(state="disabled")
+        self.btn_preencher = ctk.CTkButton(detalhe_quadro, text="Preencher com os dados encontrados  →", height=40,
+                                           font=(FONTE, 14, "bold"), state="disabled", command=self._preencher)
+        self.btn_preencher.pack(fill="x", pady=(8, 0))
 
         quadro, self.arvore = tema.tabela(caixa, [("curso", "Curso", 230), ("mes", "Mês", 60),
                                                   ("data", "Data", 95), ("aula", "Aula", 260)], alturas=8)
         quadro.pack(fill="both", expand=True, padx=16, pady=(6, 0))
         tema.pintar_tabelas(self)
         self.arvore.bind("<<TreeviewSelect>>", lambda e: self._mostrar_detalhe())
-        if not self.app.cursos:
-            self.status_busca.configure(text="Para procurar, abra a mestre na tela Início (aba do semestre). "
-                                             "O formulário ao lado funciona mesmo assim.", text_color=tema.AVISO)
-            self.btn_procurar.configure(state="disabled")
+        self.arvore.bind("<Double-1>", lambda e: self._preencher())
 
     def _procurar(self):
         nome = self.ent_busca_nome.get().strip()
@@ -110,6 +128,8 @@ class JanelaCorrecao(ctk.CTkToplevel):
         self.btn_procurar.configure(state="disabled")
         self.arvore.delete(*self.arvore.get_children())
         self._escrever_detalhe("")
+        self.btn_preencher.configure(state="disabled")
+        self._comecou()
         self.barra_busca.pack(fill="x", padx=16, pady=(4, 0), after=self.status_busca)
         app, cursos, aba, guardadas = self.app, list(self.app.cursos), self.app.aba, self.guardadas
 
@@ -130,7 +150,8 @@ class JanelaCorrecao(ctk.CTkToplevel):
             self.arvore.insert("", "end", iid=str(i), values=(a.curso, a.pasta_mes, a.data, a.aula))
         cursos = len({a.curso for a in self.achados})
         if self.achados:
-            texto = f"{len(self.achados)} aula(s) em {cursos} curso(s). Clique numa linha para ver tudo."
+            texto = (f"{len(self.achados)} aula(s) em {cursos} curso(s). Escolha a linha e clique em "
+                     "\"Preencher com os dados encontrados\" (ou dê dois cliques nela).")
             cor = tema.OK
         else:
             texto, cor = "Não achei esse docente em nenhum curso do semestre. Confira a grafia ou tire a data.", tema.AVISO
@@ -159,6 +180,7 @@ class JanelaCorrecao(ctk.CTkToplevel):
         if not sel:
             return
         a = self.achados[int(sel[0])]
+        self.btn_preencher.configure(state="normal")
         self._escrever_detalhe(
             f"Docente: {a.docente}\n"
             f"Pós-graduação (como sai no certificado): {a.nome_pos}\n"
@@ -172,6 +194,40 @@ class JanelaCorrecao(ctk.CTkToplevel):
         self.detalhe.delete("1.0", "end")
         self.detalhe.insert("1.0", texto)
         self.detalhe.configure(state="disabled")
+
+    def _preencher(self):
+        """Copia a linha escolhida para o formulário (substitui o que estava lá).
+        O coordenador vem da coordenação da mestre, igual à rodada do mês."""
+        sel = self.arvore.selection()
+        if not sel or self.ocupada:
+            return
+        a = self.achados[int(sel[0])]
+        self._comecou()
+        for chave, valor in (("docente", a.docente), ("pos", a.nome_pos or a.curso), ("aula", a.aula),
+                             ("data", a.data), ("horas", a.horas)):
+            ent = self.campos[chave]
+            ent.delete(0, "end")
+            ent.insert(0, valor or "")
+        coord = coordenadores.resolver(a.coordenacao, self.cadastro, log=lambda m: None)
+        aviso = ""
+        self.opt_titulo.set(correcao.TITULOS[0])       # não herdar o título da correção anterior
+        self.opt_cargo.set(correcao.CARGOS[0])
+        if coord.nome:
+            self.cmb_coord.set(coord.nome)
+            self._coordenador_escolhido(coord.nome)
+            if coord.assinatura:
+                self._definir_assinatura(coord.assinatura)
+            if coord.pendente == "titulo":
+                aviso = "Confira o título (Dr./Dra.) da coordenação: não está no cadastro."
+        else:
+            nomes = coord.nomes_da_planilha
+            self.cmb_coord.set(nomes[0] if nomes else "")
+            self.assinatura = ""
+            self.lbl_assinatura.configure(text="(nenhuma)", text_color=tema.APAGADO)
+            aviso = "Não achei a assinatura da coordenação: escolha o(a) coordenador(a) ou a assinatura."
+        texto = "Dados copiados da planilha. Corrija o que estiver errado e clique em Gerar PDF."
+        self.status_form.configure(text=texto + (f"\n! {aviso}" if aviso else ""),
+                                   text_color=tema.AVISO if aviso else tema.TEXTO_2)
 
     # -- formulário ---------------------------------------------------------
 
@@ -190,6 +246,7 @@ class JanelaCorrecao(ctk.CTkToplevel):
             ent = ctk.CTkEntry(caixa, height=34, placeholder_text=dica)
             if valor:
                 ent.insert(0, valor)
+            ent.bind("<Key>", self._comecou, add="+")
             ent.grid(row=linha, column=1, columnspan=2, sticky="ew", padx=(0, 12), pady=4)
             self.campos[chave] = ent
             linha += 1
@@ -248,6 +305,7 @@ class JanelaCorrecao(ctk.CTkToplevel):
         nome = (nome or "").strip()
         if not nome:
             return
+        self._comecou()
         item = self.cadastro.obter(nome)
         if item and item["titulo"] and (sobrescrever or self.opt_titulo.get() == correcao.TITULOS[0]):
             self.opt_titulo.set(item["titulo"])
@@ -262,7 +320,7 @@ class JanelaCorrecao(ctk.CTkToplevel):
         self.opt_cargo.set(correcao.CARGOS[1] if titulo.startswith(("Dra", "Profa")) else correcao.CARGOS[0])
 
     def _escolher_assinatura(self):
-        caminho = filedialog.askopenfilename(parent=self, title="Assinatura do(a) coordenador(a)",
+        caminho = filedialog.askopenfilename(parent=self.winfo_toplevel(),title="Assinatura do(a) coordenador(a)",
                                              initialdir=self.cadastro.pasta,
                                              filetypes=[("Imagens", "*.png *.jpg *.jpeg")])
         if caminho:
@@ -309,6 +367,9 @@ class JanelaCorrecao(ctk.CTkToplevel):
             texto += "\n" + "\n".join(f"! {a}" for a in avisos)
         self.status_form.configure(text=texto, text_color=tema.OK)
         self.app.registrar(f"Correção gerada: {pdf} | {p.docente} | {p.pos} | {p.aula} | {p.data} | {p.horas}")
+        if self.inicio is not None:       # gerar de novo sem mexer em nada não conta outra vez
+            economia.registrar(1, min(time.monotonic() - self.inicio, LIMITE_TEMPO), tipo="correcao")
+            self.inicio = None
         if abrir:
             self._abrir(pdf)
 
@@ -328,6 +389,7 @@ class JanelaCorrecao(ctk.CTkToplevel):
         self.assinatura = ""
         self.lbl_assinatura.configure(text="(nenhuma)", text_color=tema.APAGADO)
         self.status_form.configure(text="")
+        self.inicio = None
 
     def _abrir_pasta(self):
         os.makedirs(correcao.PASTA_CORRECOES, exist_ok=True)

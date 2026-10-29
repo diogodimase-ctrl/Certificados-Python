@@ -172,12 +172,18 @@ class BarrasTempo(_Desenho):
         c.create_text(x0, self.px(10), text="Tempo: manual × programa", anchor="w", fill=tema.TEXTO_2,
                       font=self.fonte(13))
         r = self.resumo
-        if r and r.rodadas:
+        if r and r.certificados:
+            partes = []
+            if r.rodadas:
+                partes.append(f"{r.rodadas} rodada{'s' if r.rodadas > 1 else ''}")
+            if r.correcoes:
+                partes.append(f"{r.correcoes} correç{'ões' if r.correcoes > 1 else 'ão'}")
+            partes.append(f"{r.certificados} certif.")
             c.create_text(largura - self.px(4), self.px(10), anchor="e", fill=tema.APAGADO, font=self.fonte(12),
-                          text=f"{r.rodadas} rodada{'s' if r.rodadas > 1 else ''} · {r.certificados} certif.")
-        if not r or not r.rodadas:
+                          text=" · ".join(partes))
+        if not r or not r.certificados:
             c.create_text(x0, self.px(52), anchor="w", fill=tema.APAGADO, font=self.fonte(13), width=largura - x0,
-                          text="Aparece depois da primeira rodada oficial neste computador.")
+                          text="Aparece depois da primeira rodada oficial (ou correção) neste computador.")
             return
         rotulo = self.px(78)
         valor = self.px(92)
