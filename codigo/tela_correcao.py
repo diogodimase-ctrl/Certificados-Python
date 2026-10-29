@@ -37,13 +37,15 @@ class TelaCorrecao(ctk.CTkFrame):
         self.inicio = None            # relógio desta correção (primeiro clique até o PDF)
         self.cadastro = coordenadores.Cadastro(app.locais.assinaturas, log=app.registrar)
 
-        ctk.CTkLabel(self, text="Corrigir um certificado", font=(FONTE, 20, "bold"), text_color=tema.TITULO,
-                     anchor="w").pack(fill="x", padx=32, pady=(16, 0))
-        ctk.CTkLabel(self, text="Gera um certificado avulso. Só gera o PDF: nada é enviado e nada vai para o "
-                                "SharePoint.",
-                     text_color=tema.TEXTO_2, anchor="w").pack(fill="x", padx=32, pady=(2, 10))
+        # Título e explicação numa linha só: a altura vai para a lista de resultados.
+        titulo = ctk.CTkFrame(self, fg_color="transparent")
+        titulo.pack(fill="x", padx=32, pady=(12, 8))
+        ctk.CTkLabel(titulo, text="Corrigir um certificado", font=(FONTE, 20, "bold"), text_color=tema.TITULO,
+                     anchor="w").pack(side="left")
+        ctk.CTkLabel(titulo, text="Só gera o PDF: nada é enviado e nada vai para o SharePoint.",
+                     text_color=tema.TEXTO_2, anchor="w").pack(side="left", padx=16)
         corpo = ctk.CTkFrame(self, fg_color="transparent")
-        corpo.pack(fill="both", expand=True, padx=32, pady=(0, 16))
+        corpo.pack(fill="both", expand=True, padx=32, pady=(0, 12))
         corpo.grid_columnconfigure(0, weight=5, uniform="c")
         corpo.grid_columnconfigure(1, weight=4, uniform="c")
         corpo.grid_rowconfigure(0, weight=1)
@@ -73,18 +75,15 @@ class TelaCorrecao(ctk.CTkFrame):
     def _montar_busca(self, corpo):
         caixa = ctk.CTkFrame(corpo, fg_color=tema.CARTAO, corner_radius=10)
         caixa.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-        ctk.CTkLabel(caixa, text="1. Procurar o docente nos cursos", font=(FONTE, 15, "bold"),
-                     anchor="w").pack(fill="x", padx=16, pady=(14, 2))
-        ctk.CTkLabel(caixa, text="Procura nas planilhas dos cursos das abas marcadas da mestre, em todos os meses. "
-                                 "Marque as abas de anos passados para procurar nelas também.",
-                     text_color=tema.APAGADO, anchor="w", justify="left", wraplength=620).pack(fill="x", padx=16)
+        ctk.CTkLabel(caixa, text="1. Procurar o docente nos cursos (todas as abas de mês das planilhas)",
+                     font=(FONTE, 15, "bold"), anchor="w").pack(fill="x", padx=16, pady=(12, 0))
         self.quadro_abas = ctk.CTkFrame(caixa, fg_color="transparent")
-        self.quadro_abas.pack(fill="x", padx=16, pady=(8, 0))
+        self.quadro_abas.pack(fill="x", padx=16, pady=(6, 0))
         self.abas_vistas = []         # abas desenhadas por último (redesenha se a mestre mudar)
         self.vars_abas = {}           # aba -> BooleanVar (a escolha fica enquanto o programa estiver aberto)
 
         linha = ctk.CTkFrame(caixa, fg_color="transparent")
-        linha.pack(fill="x", padx=16, pady=(10, 6))
+        linha.pack(fill="x", padx=16, pady=(6, 4))
         self.ent_busca_nome = ctk.CTkEntry(linha, placeholder_text="Nome do docente (ex.: Maria Souza)", height=36)
         self.ent_busca_nome.pack(side="left", fill="x", expand=True)
         self.ent_busca_data = ctk.CTkEntry(linha, placeholder_text="Data (opcional)", width=140, height=36)
@@ -97,7 +96,7 @@ class TelaCorrecao(ctk.CTkFrame):
 
         # Nome parcial na planilha: % mínimo do nome (ao soltar o controle, procura de novo)
         linha = ctk.CTkFrame(caixa, fg_color="transparent")
-        linha.pack(fill="x", padx=16, pady=(0, 6))
+        linha.pack(fill="x", padx=16, pady=(0, 2))
         ctk.CTkLabel(linha, text="Nome parecido: aceitar a partir de", text_color=tema.TEXTO_2).pack(side="left")
         self.lbl_minimo = ctk.CTkLabel(linha, text="", width=48, font=(FONTE, 13, "bold"))
         self.lbl_minimo.pack(side="right")
@@ -115,23 +114,27 @@ class TelaCorrecao(ctk.CTkFrame):
         self.barra_busca = ctk.CTkProgressBar(caixa, height=6)
         self.barra_busca.set(0)
 
-        detalhe_quadro = ctk.CTkFrame(caixa, fg_color="transparent")
-        detalhe_quadro.pack(side="bottom", fill="x", padx=16, pady=(6, 14))
-        ctk.CTkLabel(detalhe_quadro, text="Linha escolhida (dá para selecionar e copiar):", text_color=tema.APAGADO,
-                     anchor="w").pack(fill="x")
-        self.detalhe = ctk.CTkTextbox(detalhe_quadro, height=115, font=(FONTE, 13), wrap="word")
-        self.detalhe.pack(fill="x")
-        self.detalhe.configure(state="disabled")
-        self.btn_preencher = ctk.CTkButton(detalhe_quadro, text="Preencher com os dados encontrados  →", height=40,
-                                           font=(FONTE, 14, "bold"), state="disabled", command=self._preencher)
-        self.btn_preencher.pack(fill="x", pady=(8, 0))
-
-        quadro, self.arvore = tema.tabela(caixa, [("pct", "% nome", 72), ("docente", "Docente na planilha", 175),
+        # Embaixo: lista (fica com 3/4 da sobra), descritivo da linha escolhida (1/4) e o botão.
+        # As duas pedem pouca altura e crescem com a janela: a lista nunca some espremida.
+        baixo = ctk.CTkFrame(caixa, fg_color="transparent")
+        baixo.pack(fill="both", expand=True, padx=16, pady=(6, 12))
+        baixo.grid_columnconfigure(0, weight=1)
+        baixo.grid_rowconfigure(0, weight=3, minsize=150)
+        baixo.grid_rowconfigure(2, weight=1, minsize=70)
+        quadro, self.arvore = tema.tabela(baixo, [("pct", "% nome", 72), ("docente", "Docente na planilha", 175),
                                                   ("curso", "Curso", 160), ("semestre", "Semestre", 75),
                                                   ("mes", "Mês", 55), ("data", "Data", 90), ("aula", "Aula", 170)],
-                                          alturas=8)
+                                          alturas=4)
         self.arvore.tag_configure("parcial", foreground=tema.AVISO)
-        quadro.pack(fill="both", expand=True, padx=16, pady=(6, 0))
+        quadro.grid(row=0, column=0, sticky="nsew")
+        ctk.CTkLabel(baixo, text="Linha escolhida (dá para selecionar e copiar):", text_color=tema.APAGADO,
+                     anchor="w").grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        self.detalhe = ctk.CTkTextbox(baixo, height=70, font=(FONTE, 13), wrap="word")
+        self.detalhe.grid(row=2, column=0, sticky="nsew")
+        self.detalhe.configure(state="disabled")
+        self.btn_preencher = ctk.CTkButton(baixo, text="Preencher com os dados encontrados  →", height=38,
+                                           font=(FONTE, 14, "bold"), state="disabled", command=self._preencher)
+        self.btn_preencher.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         tema.pintar_tabelas(self)
         self.arvore.bind("<<TreeviewSelect>>", lambda e: self._mostrar_detalhe())
         self.arvore.bind("<Double-1>", lambda e: self._preencher())
@@ -184,7 +187,7 @@ class TelaCorrecao(ctk.CTkFrame):
         self._escrever_detalhe("")
         self.btn_preencher.configure(state="disabled")
         self._comecou()
-        self.barra_busca.pack(fill="x", padx=16, pady=(4, 0), after=self.status_busca)
+        self.barra_busca.pack(fill="x", padx=16, pady=(4, 0), after=self.status_busca)  # antes de "baixo"
         app, mestre, guardadas = self.app, self.app.mestre, self.guardadas
         minimo = int(self.slider_minimo.get())
         self.nome_procurado = nome
@@ -238,6 +241,8 @@ class TelaCorrecao(ctk.CTkFrame):
         self.status_busca.configure(text=texto, text_color=cor)
         if len(self.achados) == 1:
             self.arvore.selection_set("0")
+        elif self.achados:
+            self._escrever_detalhe("Clique numa linha da lista acima para ver aqui o descritivo completo dela.")
 
     def _busca_falhou(self, erro, detalhe):
         self.ocupada = False
