@@ -489,6 +489,25 @@ def ler_dados_da_planilha(caminho, abas):
     return dados
 
 
+def linhas_de_todos_os_meses(caminho):
+    """Todas as linhas de docente de todas as abas de mês ("Outubro26") da
+    planilha do curso: [(nome da aba, "10.26", nome da pós da A2, Registro)].
+    Abas que não são de mês ficam de fora. Usada pela busca da correção."""
+    saida = []
+    for ws in _abrir(caminho).worksheets:
+        pasta_mes = textos.mes_para_pasta(ws.title)
+        if not re.fullmatch(r"\d{2}\.\d{2}", pasta_mes):
+            continue
+        aba = Aba(ws)
+        nome_pos = valor_texto(ws["A2"].value).strip()
+        col_nome, col_curso, col_email = detectar_colunas(aba)
+        for linha in range(5, aba.ultima_linha(1) + 1):
+            reg = ler_registro(aba, linha, col_nome, col_curso, col_email)
+            if not reg.rodape:
+                saida += [(ws.title, pasta_mes, nome_pos, r) for r in dividir_por_docente(reg)]
+    return saida
+
+
 def contar_certificados_do_mes(caminho, pasta_mes):
     """Quantos certificados a planilha do curso prevê no mês ("10.26"): as
     mesmas linhas que ler_dados_da_planilha leria. 0 se o curso não tem a aba

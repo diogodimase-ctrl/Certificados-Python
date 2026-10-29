@@ -40,6 +40,7 @@ import atualizacao
 import tema
 from componentes import BarrasTempo, Etapas, PlanilhaCursos, Rosca
 from conferencia import em_segundo_plano, linha_de_arquivo
+from tela_correcao import JanelaCorrecao
 from tema import FONTE, tabela
 
 COR_OK, COR_ERRO, COR_AVISO, COR_APAGADO = tema.OK, tema.ERRO, tema.AVISO, tema.APAGADO
@@ -203,6 +204,8 @@ class App(ctk.CTk):
         self.chip_arquivos = ctk.CTkButton(linha, text="", height=32, corner_radius=16, font=(FONTE, 13, "bold"),
                                            command=self.abrir_configuracoes)
         self.chip_arquivos.pack(side="right", padx=12)
+        ctk.CTkButton(linha, text="✎  Corrigir um certificado", height=32, corner_radius=16, font=(FONTE, 13, "bold"),
+                      **tema.BOTAO_CONTORNO, command=self.abrir_correcao).pack(side="right")
         self.botao_atualizar = ctk.CTkButton(linha, text="", height=32, fg_color=tema.OK_FUNDO,
                                              hover_color="#1f4d40", text_color=tema.OK, font=(FONTE, 13, "bold"))
         # Só depois que a janela abriu (a resposta volta para a janela, que precisa estar rodando).
@@ -309,6 +312,14 @@ class App(ctk.CTk):
         else:
             self.chip_arquivos.configure(text="✓  Arquivos e pastas ok", fg_color=tema.OK_FUNDO,
                                          hover_color="#1f4d40", text_color=tema.OK)
+
+    def abrir_correcao(self):
+        janela = getattr(self, "janela_correcao", None)
+        if janela is not None and janela.winfo_exists():
+            janela.lift()
+            janela.focus_force()
+            return
+        self.janela_correcao = JanelaCorrecao(self)
 
     def abrir_configuracoes(self):
         d = Dialogo(self, "Arquivos e configurações",

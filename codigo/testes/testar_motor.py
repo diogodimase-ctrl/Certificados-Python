@@ -465,6 +465,52 @@ def limpar_pastas_vazias_da_para_enviar():
 
 
 @teste
+def correcao_avulsa():
+    from certificados import correcao
+    raiz, locais = _ambiente()
+    try:
+        assert correcao.nome_confere("maria exemplo", "Dra. Maria  Exemplo")
+        assert correcao.nome_confere("Maria", "Maria Exemplo") and not correcao.nome_confere("Mariana", "Maria Exemplo")
+        assert correcao.data_confere("6/4", "06/04/2026") and correcao.data_confere("06.04.26", "06/04/2026")
+        assert not correcao.data_confere("06/04/2025", "06/04/2026") and correcao.data_confere("", "06/04/2026")
+        igual((correcao.horas_do_certificado("4"), correcao.horas_do_certificado("08:00 - 12:30"),
+               correcao.horas_do_certificado("4 horas"), correcao.horas_do_certificado("meio período")),
+              ("4 horas", "4 horas e 30 minutos", "4 horas", "meio período"))
+
+        cursos = planilhas.ler_cursos_da_mestre(locais.planilha_mestre, "2026-5")
+        guardadas = {}
+        achados, sem, falhas = correcao.procurar(locais, cursos, "2026-5", "maria exemplo", guardadas=guardadas)
+        igual(sorted(a.data for a in achados), ["06/04/2026", "08/04/2026"])
+        a = achados[0]
+        igual((a.curso, a.codigo, a.pasta_mes, a.docente), ("Cardiologia Clínica", "2026-A-PTA-1S", "04.26", "Maria Exemplo"))
+        assert a.nome_pos and a.aula and a.horas, a
+        igual(sem, ["Psiquiatria Adulto", "Curso Sem Planilha"])
+        igual(falhas, [])
+        achados, _, _ = correcao.procurar(locais, cursos, "2026-5", "maria exemplo", "8/4", guardadas=guardadas)
+        igual([x.data for x in achados], ["08/04/2026"])
+
+        cad = coordenadores.Cadastro(locais.assinaturas, log=lambda m: None)
+        coord = coordenadores.resolver(cursos[0].coordenacao, cad, log=lambda m: None)
+        p = correcao.Pedido("Maria Exemplo", a.nome_pos, "Aula corrigida", "6/4/26", "4", coord.nome, "Dra.",
+                            "Coordenadora do Curso", coord.assinatura, "29/10/2026")
+        igual(correcao.conferir(p), [])
+        igual(correcao.conferir(correcao.Pedido("", "", "", "31/31", "", "", "", "", "", "")),
+              ["Nome do docente em branco", "Pós-graduação em branco", "Aula / disciplina em branco",
+               "Horas em branco", "Coordenador(a) em branco", "Data da aula inválida (use dd/mm/aaaa)",
+               "Data de emissão inválida (use dd/mm/aaaa)", "Assinatura não escolhida"])
+        pasta = os.path.join(raiz, "Correções")
+        pdf, avisos = correcao.gerar(p, locais, locais.modelo, ConversorFalso(), pasta=pasta)
+        igual(pdf, os.path.join(pasta, "04.26", "Maria Exemplo (06.04.2026).pdf"))
+        from pptx import Presentation
+        texto = " ".join(f.text_frame.text for f in Presentation(pdf).slides[0].shapes if f.has_text_frame)
+        assert "Aula corrigida" in texto and "4 horas" in texto and "Maria Exemplo" in texto, texto
+        pdf2, _ = correcao.gerar(p, locais, locais.modelo, ConversorFalso(), pasta=pasta)   # de novo: substitui
+        igual((pdf2, os.listdir(os.path.dirname(pdf))), (pdf, ["Maria Exemplo (06.04.2026).pdf"]))
+    finally:
+        shutil.rmtree(raiz, ignore_errors=True)
+
+
+@teste
 def tempo_economizado():
     pasta = tempfile.mkdtemp()
     try:
