@@ -73,10 +73,12 @@ class Locais:
 _PALAVRAS_IGNORADAS = {"para", "com", "pos", "graduacao", "especializacao", "em", "de", "da", "do", "dos", "das"}
 
 
-def localizar_planilha_do_curso(raiz, nome_curso, unidade="", semestre=""):
+def localizar_planilha_do_curso(raiz, nome_curso, unidade="", semestre="", cache=None):
     """LocalizarPlanilhaCursoDinamica: procura o .xlsx do curso nas pastas
     "Planilha compartilhada - Pós-graduação*" (e em Declarações), do critério
-    mais forte (curso + unidade + semestre) para o mais fraco (só o curso)."""
+    mais forte (curso + unidade + semestre) para o mais fraco (só o curso).
+    "cache" (dict) guarda a lista de arquivos de cada pasta entre chamadas
+    (a busca da correção chama isto para muitos cursos de uma vez)."""
     if not raiz or not os.path.isdir(raiz):
         return ""
     palavras = [w for w in textos.normalizar(nome_curso).split(" ")
@@ -96,11 +98,18 @@ def localizar_planilha_do_curso(raiz, nome_curso, unidade="", semestre=""):
     if os.path.isdir(decl):
         pastas.append(decl)
 
-    arquivos = []
+    normalizados = []
     for pasta in pastas:
-        for atual, _, nomes in os.walk(pasta):
-            arquivos += [os.path.join(atual, n) for n in sorted(nomes) if n.lower().endswith(".xlsx")]
-    normalizados = [(a, textos.normalizar(a)) for a in arquivos]
+        if cache is None or pasta not in cache:
+            lista = []
+            for atual, _, nomes in os.walk(pasta):
+                lista += [os.path.join(atual, n) for n in sorted(nomes) if n.lower().endswith(".xlsx")]
+            lista = [(a, textos.normalizar(a)) for a in lista]
+            if cache is None:
+                normalizados += lista
+                continue
+            cache[pasta] = lista
+        normalizados += cache[pasta]
 
     def tem_curso(n):
         return all(k in n for k in palavras)

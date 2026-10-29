@@ -7,6 +7,7 @@ Rodar:  python testes/testar_motor.py            (rápido, sem PowerPoint)
 Os valores esperados foram calculados à mão seguindo as regras do AHK v27.
 """
 
+import dataclasses
 import json
 import os
 import re
@@ -479,15 +480,22 @@ def correcao_avulsa():
 
         cursos = planilhas.ler_cursos_da_mestre(locais.planilha_mestre, "2026-5")
         guardadas = {}
-        achados, sem, falhas = correcao.procurar(locais, cursos, "2026-5", "maria exemplo", guardadas=guardadas)
-        igual(sorted(a.data for a in achados), ["06/04/2026", "08/04/2026"])
+        achados, sem, falhas = correcao.procurar(locais, cursos, "maria exemplo", guardadas=guardadas)
+        igual([a.data for a in achados], ["06/04/2026", "08/04/2026"])
         a = achados[0]
-        igual((a.curso, a.codigo, a.pasta_mes, a.docente), ("Cardiologia Clínica", "2026-A-PTA-1S", "04.26", "Maria Exemplo"))
+        igual((a.curso, a.codigo, a.pasta_mes, a.docente, a.semestre),
+              ("Cardiologia Clínica", "2026-A-PTA-1S", "04.26", "Maria Exemplo", "2026-5"))
         assert a.nome_pos and a.aula and a.horas, a
-        igual(sem, ["Psiquiatria Adulto", "Curso Sem Planilha"])
+        igual(sem, ["Psiquiatria Adulto (2026-5)", "Curso Sem Planilha (2026-5)"])
         igual(falhas, [])
-        achados, _, _ = correcao.procurar(locais, cursos, "2026-5", "maria exemplo", "8/4", guardadas=guardadas)
+        achados, _, _ = correcao.procurar(locais, cursos, "maria exemplo", "8/4", guardadas=guardadas)
         igual([x.data for x in achados], ["08/04/2026"])
+        # várias abas da mestre (anos passados): a que não existe é avisada; a mesma planilha não repete linhas
+        cursos2, faltando = correcao.cursos_das_abas(locais.planilha_mestre, ["2026-5", "2019-5"], guardadas)
+        igual((len(cursos2), faltando), (len(cursos), ["2019-5"]))
+        dobrado = cursos + [dataclasses.replace(cursos[0], aba_mestre="2026-6")]
+        achados, _, _ = correcao.procurar(locais, dobrado, "maria exemplo", guardadas=guardadas)
+        igual(len(achados), 2)
 
         cad = coordenadores.Cadastro(locais.assinaturas, log=lambda m: None)
         coord = coordenadores.resolver(cursos[0].coordenacao, cad, log=lambda m: None)

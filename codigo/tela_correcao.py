@@ -51,10 +51,9 @@ class TelaCorrecao(ctk.CTkFrame):
         self._montar_formulario(corpo)
 
     def mostrar(self):
-        """Chamado toda vez que a tela aparece: a aba da mestre pode ter mudado."""
-        aba = self.app.aba or "—"
-        self.lbl_aba.configure(text=f"Procura nas planilhas dos cursos da aba {aba} da mestre, em todos os meses.")
-        if self.app.cursos:
+        """Chamado toda vez que a tela aparece: as abas da mestre podem ter chegado ou mudado."""
+        self._desenhar_abas()
+        if self.app.abas_mestre:
             if not self.ocupada:
                 self.btn_procurar.configure(state="normal")
             if "abra a mestre" in self.status_busca.cget("text"):
@@ -76,9 +75,13 @@ class TelaCorrecao(ctk.CTkFrame):
         caixa.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         ctk.CTkLabel(caixa, text="1. Procurar o docente nos cursos", font=(FONTE, 15, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(14, 2))
-        self.lbl_aba = ctk.CTkLabel(caixa, text="", text_color=tema.APAGADO, anchor="w", justify="left",
-                                    wraplength=620)
-        self.lbl_aba.pack(fill="x", padx=16)
+        ctk.CTkLabel(caixa, text="Procura nas planilhas dos cursos das abas marcadas da mestre, em todos os meses. "
+                                 "Marque as abas de anos passados para procurar nelas também.",
+                     text_color=tema.APAGADO, anchor="w", justify="left", wraplength=620).pack(fill="x", padx=16)
+        self.quadro_abas = ctk.CTkFrame(caixa, fg_color="transparent")
+        self.quadro_abas.pack(fill="x", padx=16, pady=(8, 0))
+        self.abas_vistas = []         # abas desenhadas por último (redesenha se a mestre mudar)
+        self.vars_abas = {}           # aba -> BooleanVar (a escolha fica enquanto o programa estiver aberto)
 
         linha = ctk.CTkFrame(caixa, fg_color="transparent")
         linha.pack(fill="x", padx=16, pady=(10, 6))
@@ -109,20 +112,55 @@ class TelaCorrecao(ctk.CTkFrame):
                                            font=(FONTE, 14, "bold"), state="disabled", command=self._preencher)
         self.btn_preencher.pack(fill="x", pady=(8, 0))
 
-        quadro, self.arvore = tema.tabela(caixa, [("curso", "Curso", 230), ("mes", "Mês", 60),
-                                                  ("data", "Data", 95), ("aula", "Aula", 260)], alturas=8)
+        quadro, self.arvore = tema.tabela(caixa, [("curso", "Curso", 210), ("semestre", "Semestre", 80),
+                                                  ("mes", "Mês", 60), ("data", "Data", 95), ("aula", "Aula", 230)],
+                                          alturas=8)
         quadro.pack(fill="both", expand=True, padx=16, pady=(6, 0))
         tema.pintar_tabelas(self)
         self.arvore.bind("<<TreeviewSelect>>", lambda e: self._mostrar_detalhe())
         self.arvore.bind("<Double-1>", lambda e: self._preencher())
 
+    def _desenhar_abas(self):
+        """Uma caixinha por aba de semestre da mestre. Na primeira vez, só a aba
+        aberta na tela Início vem marcada."""
+        abas = self.app._abas_de_semestre() if self.app.abas_mestre else []
+        if abas == self.abas_vistas:
+            if self.app.aba in self.vars_abas and not any(v.get() for v in self.vars_abas.values()):
+                self.vars_abas[self.app.aba].set(True)
+            return
+        self.abas_vistas = abas
+        for w in self.quadro_abas.winfo_children():
+            w.destroy()
+        if not abas:
+            return
+        marcadas = {a for a, v in self.vars_abas.items() if v.get()} or {self.app.aba}
+        self.vars_abas = {a: ctk.BooleanVar(value=a in marcadas) for a in abas}
+        ctk.CTkLabel(self.quadro_abas, text="Abas da mestre:", text_color=tema.TEXTO_2, anchor="w").grid(
+            row=0, column=0, sticky="w", padx=(0, 8))
+        por_linha = 6
+        for i, aba in enumerate(abas):
+            ctk.CTkCheckBox(self.quadro_abas, text=aba, variable=self.vars_abas[aba], width=90, checkbox_width=20,
+                            checkbox_height=20).grid(row=i // por_linha, column=1 + i % por_linha, sticky="w", pady=2)
+        botoes = ctk.CTkFrame(self.quadro_abas, fg_color="transparent")
+        botoes.grid(row=0, column=2 + por_linha, sticky="e", padx=(8, 0))
+        self.quadro_abas.grid_columnconfigure(1 + por_linha, weight=1)
+        ctk.CTkButton(botoes, text="Todas", width=64, height=26, **tema.BOTAO_CONTORNO,
+                      command=lambda: [v.set(True) for v in self.vars_abas.values()]).pack(side="left")
+        ctk.CTkButton(botoes, text="Só a atual", width=84, height=26, **tema.BOTAO_CONTORNO,
+                      command=lambda: [v.set(a == self.app.aba) for a, v in self.vars_abas.items()]).pack(
+            side="left", padx=(6, 0))
+
     def _procurar(self):
         nome = self.ent_busca_nome.get().strip()
         data = self.ent_busca_data.get().strip()
-        if self.ocupada or not self.app.cursos:
+        if self.ocupada or not self.app.abas_mestre:
             return
         if len(nome) < 3:
             self.status_busca.configure(text="Digite pelo menos parte do nome do docente.", text_color=tema.AVISO)
+            return
+        abas = [a for a in self.abas_vistas if self.vars_abas[a].get()]
+        if not abas:
+            self.status_busca.configure(text="Marque pelo menos uma aba da mestre.", text_color=tema.AVISO)
             return
         self.ocupada = True
         self.btn_procurar.configure(state="disabled")
@@ -131,31 +169,40 @@ class TelaCorrecao(ctk.CTkFrame):
         self.btn_preencher.configure(state="disabled")
         self._comecou()
         self.barra_busca.pack(fill="x", padx=16, pady=(4, 0), after=self.status_busca)
-        app, cursos, aba, guardadas = self.app, list(self.app.cursos), self.app.aba, self.guardadas
+        app, mestre, guardadas = self.app, self.app.mestre, self.guardadas
+        self.status_busca.configure(text=f"Lendo os cursos de {len(abas)} aba(s) da mestre…", text_color=tema.TEXTO_2)
 
         def progresso(i, total, curso):
             self.after(0, lambda: (self.barra_busca.set(i / max(total, 1)),
                                    self.status_busca.configure(text=f"Lendo {i + 1} de {total}: {curso}",
                                                                text_color=tema.TEXTO_2)))
 
-        em_segundo_plano(self, lambda: correcao.procurar(app.locais, cursos, aba, nome, data, progresso, guardadas),
-                         self._procurado, self._busca_falhou)
+        def trabalho():
+            cursos, faltando = correcao.cursos_das_abas(mestre, abas, guardadas)
+            return correcao.procurar(app.locais, cursos, nome, data, progresso, guardadas) + (faltando, len(abas))
+
+        em_segundo_plano(self, trabalho, self._procurado, self._busca_falhou)
 
     def _procurado(self, resultado):
         self.ocupada = False
         self.btn_procurar.configure(state="normal")
         self.barra_busca.pack_forget()
-        self.achados, sem_planilha, falhas = resultado
+        self.achados, sem_planilha, falhas, abas_faltando, n_abas = resultado
         for i, a in enumerate(self.achados):
-            self.arvore.insert("", "end", iid=str(i), values=(a.curso, a.pasta_mes, a.data, a.aula))
-        cursos = len({a.curso for a in self.achados})
+            self.arvore.insert("", "end", iid=str(i), values=(a.curso, a.semestre, a.pasta_mes, a.data, a.aula))
+        cursos = len({(a.curso, a.semestre) for a in self.achados})
+        onde = "na aba marcada" if n_abas == 1 else f"nas {n_abas} abas marcadas"
         if self.achados:
-            texto = (f"{len(self.achados)} aula(s) em {cursos} curso(s). Escolha a linha e clique em "
+            texto = (f"{len(self.achados)} aula(s) em {cursos} curso(s) {onde}. Escolha a linha e clique em "
                      "\"Preencher com os dados encontrados\" (ou dê dois cliques nela).")
             cor = tema.OK
         else:
-            texto, cor = "Não achei esse docente em nenhum curso do semestre. Confira a grafia ou tire a data.", tema.AVISO
+            texto = (f"Não achei esse docente em nenhum curso {onde}. Confira a grafia, tire a data "
+                     "ou marque mais abas.")
+            cor = tema.AVISO
         extras = []
+        if abas_faltando:
+            extras.append(f"aba(s) não encontrada(s) na mestre: {', '.join(abas_faltando)}")
         if sem_planilha:
             extras.append(f"{len(sem_planilha)} curso(s) sem planilha encontrada")
         if falhas:
@@ -187,7 +234,8 @@ class TelaCorrecao(ctk.CTkFrame):
             f"Aula / disciplina: {a.aula}\n"
             f"Data: {a.data}    Horas: {a.horas}\n"
             f"Coordenação (mestre): {a.coordenacao}\n"
-            f"Curso na mestre: {a.curso} ({a.codigo}) · aba {a.aba}, linha {a.linha}")
+            f"Curso na mestre: {a.curso} ({a.codigo}), aba {a.semestre} · na planilha do curso: aba {a.aba}, "
+            f"linha {a.linha}")
 
     def _escrever_detalhe(self, texto):
         self.detalhe.configure(state="normal")

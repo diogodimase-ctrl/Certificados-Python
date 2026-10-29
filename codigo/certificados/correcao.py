@@ -2,8 +2,9 @@
 Correção avulsa (era o Gerar_Manual_v1 do AHK): um certificado por vez, com
 todos os campos digitados à mão. Só gera o PDF, não manda e-mail.
 
-Ajuda no preenchimento: procurar() acha em quais cursos do semestre (planilha
-de cada curso, todas as abas de mês) aparece um docente, com a data opcional.
+Ajuda no preenchimento: procurar() acha em quais cursos aparece um docente
+(planilha de cada curso, todas as abas de mês), com a data opcional. Os cursos
+vêm das abas da mestre escolhidas (cursos_das_abas), inclusive de anos passados.
 """
 
 import os
@@ -36,6 +37,8 @@ class Achado:
     aula: str
     data: str
     horas: str
+    semestre: str = ""    # aba da mestre onde o curso está ("2025-5")
+    planilha: str = ""
 
 
 def nome_confere(procurado, nome):
@@ -61,18 +64,38 @@ def data_confere(procurada, data):
     return not m.group(3) or m.group(3)[-2:] == d.group(3)[-2:]
 
 
-def procurar(locais, cursos, aba_mestre, nome, data="", progresso=None, guardadas=None):
-    """Devolve (achados, cursos sem planilha, falhas). "guardadas" é um dict
+def cursos_das_abas(mestre, abas, guardadas=None):
+    """Cursos de várias abas da mestre (cada um sabe a sua em c.aba_mestre).
+    Devolve (cursos, abas que não existem)."""
+    guardadas = {} if guardadas is None else guardadas
+    cursos, faltando = [], []
+    for aba in abas:
+        chave = f"mestre|{os.path.normcase(mestre)}|{os.path.getmtime(mestre):.0f}|{aba}"
+        if chave not in guardadas:
+            guardadas[chave] = planilhas.ler_cursos_da_mestre(mestre, aba)
+        if guardadas[chave] is None:
+            faltando.append(aba)
+        else:
+            cursos += guardadas[chave]
+    return cursos, faltando
+
+
+def procurar(locais, cursos, nome, data="", progresso=None, guardadas=None):
+    """Devolve (achados, cursos sem planilha, falhas). Cada curso é procurado
+    com o semestre da sua aba da mestre (c.aba_mestre). "guardadas" é um dict
     para não reabrir a mesma planilha a cada busca (chave = caminho + data
-    de modificação)."""
+    de modificação). Se dois semestres caírem na mesma planilha, a linha
+    aparece uma vez só."""
     guardadas = {} if guardadas is None else guardadas
     achados, sem_planilha, falhas = [], [], []
+    vistos, pastas = set(), {}
     for i, c in enumerate(cursos):
         if progresso:
             progresso(i, len(cursos), c.posgrad)
-        caminho = caminhos.localizar_planilha_do_curso(locais.raiz_onedrive, c.posgrad, c.unidade, aba_mestre)
+        caminho = caminhos.localizar_planilha_do_curso(locais.raiz_onedrive, c.posgrad, c.unidade, c.aba_mestre,
+                                                       cache=pastas)
         if not caminho:
-            sem_planilha.append(c.posgrad)
+            sem_planilha.append(f"{c.posgrad} ({c.aba_mestre})" if c.aba_mestre else c.posgrad)
             continue
         try:
             chave = f"{os.path.normcase(caminho)}|{os.path.getmtime(caminho):.0f}"
@@ -83,9 +106,15 @@ def procurar(locais, cursos, aba_mestre, nome, data="", progresso=None, guardada
             continue
         for aba, pasta_mes, nome_pos, r in guardadas[chave]:
             if nome_confere(nome, r.nome) and data_confere(data, r.data_aula):
+                unico = (os.path.normcase(caminho), aba, r.linha, r.nome)
+                if unico in vistos:
+                    continue
+                vistos.add(unico)
                 achados.append(Achado(c.posgrad, c.unidade, c.coordenacao, nome_pos, aba, pasta_mes, r.linha,
-                                      r.nome, r.curso, r.data_aula, r.horas_formatadas))
-    achados.sort(key=lambda a: (a.curso.casefold(), a.pasta_mes[3:], a.pasta_mes[:2], a.data))
+                                      r.nome, r.curso, r.data_aula, r.horas_formatadas, c.aba_mestre, caminho))
+    # mês mais recente primeiro; dentro do mês, por curso e data
+    achados.sort(key=lambda a: (a.curso.casefold(), a.data[6:], a.data[3:5], a.data[:2]))
+    achados.sort(key=lambda a: (a.pasta_mes[3:], a.pasta_mes[:2]), reverse=True)
     return achados, sem_planilha, falhas
 
 
