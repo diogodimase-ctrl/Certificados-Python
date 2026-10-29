@@ -95,6 +95,20 @@ class TelaCorrecao(ctk.CTkFrame):
             ent.bind("<Return>", lambda e: self._procurar())
             ent.bind("<Key>", self._comecou, add="+")
 
+        # Nome parcial na planilha: % mínimo do nome (ao soltar o controle, procura de novo)
+        linha = ctk.CTkFrame(caixa, fg_color="transparent")
+        linha.pack(fill="x", padx=16, pady=(0, 6))
+        ctk.CTkLabel(linha, text="Nome parecido: aceitar a partir de", text_color=tema.TEXTO_2).pack(side="left")
+        self.lbl_minimo = ctk.CTkLabel(linha, text="", width=48, font=(FONTE, 13, "bold"))
+        self.lbl_minimo.pack(side="right")
+        self.slider_minimo = ctk.CTkSlider(linha, from_=30, to=100, number_of_steps=7,
+                                           command=lambda v: self.lbl_minimo.configure(text=f"{int(v)}%"))
+        self.slider_minimo.set(correcao.MINIMO_PADRAO)
+        self.lbl_minimo.configure(text=f"{correcao.MINIMO_PADRAO}%")
+        self.slider_minimo.pack(side="left", fill="x", expand=True, padx=(10, 6))
+        self.slider_minimo.bind("<ButtonRelease-1>", lambda e: self.achados and self._procurar(), add="+")
+        self.nome_procurado = ""
+
         self.status_busca = ctk.CTkLabel(caixa, text="", text_color=tema.TEXTO_2, anchor="w", justify="left",
                                          wraplength=620)
         self.status_busca.pack(fill="x", padx=16)
@@ -105,16 +119,18 @@ class TelaCorrecao(ctk.CTkFrame):
         detalhe_quadro.pack(side="bottom", fill="x", padx=16, pady=(6, 14))
         ctk.CTkLabel(detalhe_quadro, text="Linha escolhida (dá para selecionar e copiar):", text_color=tema.APAGADO,
                      anchor="w").pack(fill="x")
-        self.detalhe = ctk.CTkTextbox(detalhe_quadro, height=130, font=(FONTE, 13), wrap="word")
+        self.detalhe = ctk.CTkTextbox(detalhe_quadro, height=115, font=(FONTE, 13), wrap="word")
         self.detalhe.pack(fill="x")
         self.detalhe.configure(state="disabled")
         self.btn_preencher = ctk.CTkButton(detalhe_quadro, text="Preencher com os dados encontrados  →", height=40,
                                            font=(FONTE, 14, "bold"), state="disabled", command=self._preencher)
         self.btn_preencher.pack(fill="x", pady=(8, 0))
 
-        quadro, self.arvore = tema.tabela(caixa, [("curso", "Curso", 210), ("semestre", "Semestre", 80),
-                                                  ("mes", "Mês", 60), ("data", "Data", 95), ("aula", "Aula", 230)],
+        quadro, self.arvore = tema.tabela(caixa, [("pct", "% nome", 72), ("docente", "Docente na planilha", 175),
+                                                  ("curso", "Curso", 160), ("semestre", "Semestre", 75),
+                                                  ("mes", "Mês", 55), ("data", "Data", 90), ("aula", "Aula", 170)],
                                           alturas=8)
+        self.arvore.tag_configure("parcial", foreground=tema.AVISO)
         quadro.pack(fill="both", expand=True, padx=16, pady=(6, 0))
         tema.pintar_tabelas(self)
         self.arvore.bind("<<TreeviewSelect>>", lambda e: self._mostrar_detalhe())
@@ -170,6 +186,8 @@ class TelaCorrecao(ctk.CTkFrame):
         self._comecou()
         self.barra_busca.pack(fill="x", padx=16, pady=(4, 0), after=self.status_busca)
         app, mestre, guardadas = self.app, self.app.mestre, self.guardadas
+        minimo = int(self.slider_minimo.get())
+        self.nome_procurado = nome
         self.status_busca.configure(text=f"Lendo os cursos de {len(abas)} aba(s) da mestre…", text_color=tema.TEXTO_2)
 
         def progresso(i, total, curso):
@@ -179,7 +197,8 @@ class TelaCorrecao(ctk.CTkFrame):
 
         def trabalho():
             cursos, faltando = correcao.cursos_das_abas(mestre, abas, guardadas)
-            return correcao.procurar(app.locais, cursos, nome, data, progresso, guardadas) + (faltando, len(abas))
+            return correcao.procurar(app.locais, cursos, nome, data, progresso, guardadas, minimo) + (faltando,
+                                                                                                     len(abas))
 
         em_segundo_plano(self, trabalho, self._procurado, self._busca_falhou)
 
@@ -189,12 +208,17 @@ class TelaCorrecao(ctk.CTkFrame):
         self.barra_busca.pack_forget()
         self.achados, sem_planilha, falhas, abas_faltando, n_abas = resultado
         for i, a in enumerate(self.achados):
-            self.arvore.insert("", "end", iid=str(i), values=(a.curso, a.semestre, a.pasta_mes, a.data, a.aula))
+            parcial = not correcao.nome_confere(self.nome_procurado, a.docente, 101)   # nem tudo o digitado está lá
+            self.arvore.insert("", "end", iid=str(i), values=(f"{a.semelhanca}%", a.docente, a.curso, a.semestre,
+                                                              a.pasta_mes, a.data, a.aula),
+                               tags=("parcial",) if parcial else ())
         cursos = len({(a.curso, a.semestre) for a in self.achados})
         onde = "na aba marcada" if n_abas == 1 else f"nas {n_abas} abas marcadas"
         if self.achados:
-            texto = (f"{len(self.achados)} aula(s) em {cursos} curso(s) {onde}. Escolha a linha e clique em "
-                     "\"Preencher com os dados encontrados\" (ou dê dois cliques nela).")
+            texto = f"{len(self.achados)} aula(s) em {cursos} curso(s) {onde}."
+            parciais = len(self.arvore.tag_has("parcial"))
+            if parciais:
+                texto += f" Em amarelo, {parciais} com o nome só parecido: confira se é a mesma pessoa."
             cor = tema.OK
         else:
             texto = (f"Não achei esse docente em nenhum curso {onde}. Confira a grafia, tire a data "
@@ -229,7 +253,7 @@ class TelaCorrecao(ctk.CTkFrame):
         a = self.achados[int(sel[0])]
         self.btn_preencher.configure(state="normal")
         self._escrever_detalhe(
-            f"Docente: {a.docente}\n"
+            f"Docente: {a.docente}   ({a.semelhanca}% do nome)\n"
             f"Pós-graduação (como sai no certificado): {a.nome_pos}\n"
             f"Aula / disciplina: {a.aula}\n"
             f"Data: {a.data}    Horas: {a.horas}\n"

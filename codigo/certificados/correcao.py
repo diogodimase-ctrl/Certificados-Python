@@ -39,14 +39,60 @@ class Achado:
     horas: str
     semestre: str = ""    # aba da mestre onde o curso está ("2025-5")
     planilha: str = ""
+    semelhanca: int = 100 # % do nome (ver semelhanca())
 
 
-def nome_confere(procurado, nome):
-    """Todas as palavras digitadas estão no nome (sem acento, título e de/da/do):
-    "maria souza" acha "Dra. Maria Aparecida de Souza"."""
+MINIMO_PADRAO = 50            # % mínimo da tela, quando nem tudo o que foi digitado está no nome
+
+
+def _mesma_palavra(a, b):
+    """Igual ou inicial ("a" x "aparecida"). Pedaço de palavra não vale: "maria" não é "mariana"."""
+    curta, longa = sorted((a, b), key=len)
+    return a == b or len(curta) == 1 and longa.startswith(curta)
+
+
+def _comparar(procurado, nome):
+    """(palavras em comum, inteiras em comum, nº digitadas, nº na planilha), sem
+    acento, título (Dr., Dra., Prof.) e partículas (de, da, do, di, du, e)."""
     buscadas = textos.palavras_do_nome(textos.chave_nome(procurado))
     palavras = textos.palavras_do_nome(textos.chave_nome(nome))
-    return bool(buscadas) and all(p in palavras for p in buscadas)
+    livres = list(palavras)
+    comuns = inteiras = 0
+    for b in buscadas:
+        for p in livres:
+            if _mesma_palavra(b, p):
+                livres.remove(p)
+                comuns += 1
+                inteiras += min(len(b), len(p)) > 1
+                break
+    return comuns, inteiras, len(buscadas), len(palavras)
+
+
+def semelhanca(procurado, nome):
+    """% do nome: palavras em comum ÷ palavras do nome mais comprido (o digitado
+    ou o da planilha). "Diogo di Mase Estevam" x "Diogo Estevam" = 2 de 3 = 67%."""
+    comuns, _, n_buscadas, n_palavras = _comparar(procurado, nome)
+    return round(100 * comuns / max(n_buscadas, n_palavras, 1))
+
+
+def aceita(procurado, nome, minimo=MINIMO_PADRAO):
+    """% do nome se a linha entra no resultado; 0 se não entra.
+    1) Tudo o que foi digitado está no nome: entra sempre ("maria" acha toda Maria).
+    2) Senão, precisa do % mínimo E de 2 palavras inteiras em comum (ou 1, se
+       um dos lados só tem uma): "Maria Souza" x "Maria Santos" não entra."""
+    comuns, inteiras, n_buscadas, n_palavras = _comparar(procurado, nome)
+    if not inteiras:
+        return 0
+    pct = round(100 * comuns / max(n_buscadas, n_palavras))
+    if comuns == n_buscadas:
+        return pct
+    if pct >= minimo and inteiras >= min(2, n_buscadas, n_palavras):
+        return pct
+    return 0
+
+
+def nome_confere(procurado, nome, minimo=MINIMO_PADRAO):
+    return aceita(procurado, nome, minimo) > 0
 
 
 def data_confere(procurada, data):
@@ -80,7 +126,7 @@ def cursos_das_abas(mestre, abas, guardadas=None):
     return cursos, faltando
 
 
-def procurar(locais, cursos, nome, data="", progresso=None, guardadas=None):
+def procurar(locais, cursos, nome, data="", progresso=None, guardadas=None, minimo=MINIMO_PADRAO):
     """Devolve (achados, cursos sem planilha, falhas). Cada curso é procurado
     com o semestre da sua aba da mestre (c.aba_mestre). "guardadas" é um dict
     para não reabrir a mesma planilha a cada busca (chave = caminho + data
@@ -105,16 +151,17 @@ def procurar(locais, cursos, nome, data="", progresso=None, guardadas=None):
             falhas.append(f"{c.posgrad}: {e}")
             continue
         for aba, pasta_mes, nome_pos, r in guardadas[chave]:
-            if nome_confere(nome, r.nome) and data_confere(data, r.data_aula):
+            nota = aceita(nome, r.nome, minimo)
+            if nota and data_confere(data, r.data_aula):
                 unico = (os.path.normcase(caminho), aba, r.linha, r.nome)
                 if unico in vistos:
                     continue
                 vistos.add(unico)
                 achados.append(Achado(c.posgrad, c.unidade, c.coordenacao, nome_pos, aba, pasta_mes, r.linha,
-                                      r.nome, r.curso, r.data_aula, r.horas_formatadas, c.aba_mestre, caminho))
-    # mês mais recente primeiro; dentro do mês, por curso e data
+                                      r.nome, r.curso, r.data_aula, r.horas_formatadas, c.aba_mestre, caminho, nota))
+    # mais parecidos primeiro; depois mês mais recente; dentro do mês, por curso e data
     achados.sort(key=lambda a: (a.curso.casefold(), a.data[6:], a.data[3:5], a.data[:2]))
-    achados.sort(key=lambda a: (a.pasta_mes[3:], a.pasta_mes[:2]), reverse=True)
+    achados.sort(key=lambda a: (a.semelhanca, a.pasta_mes[3:], a.pasta_mes[:2]), reverse=True)
     return achados, sem_planilha, falhas
 
 

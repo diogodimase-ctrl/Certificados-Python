@@ -472,6 +472,13 @@ def correcao_avulsa():
     try:
         assert correcao.nome_confere("maria exemplo", "Dra. Maria  Exemplo")
         assert correcao.nome_confere("Maria", "Maria Exemplo") and not correcao.nome_confere("Mariana", "Maria Exemplo")
+        # nome parcial na planilha: % = palavras em comum ÷ nome mais comprido (sem título e de/da/di)
+        igual(correcao.aceita("Diogo di Mase Estevam", "Diogo Estevam"), 67)
+        igual(correcao.aceita("Diogo di Mase Estevam", "Diogo Estevam", minimo=70), 0)
+        igual(correcao.aceita("diogo estevam", "Dr. Diogo di Mase Estevam", minimo=90), 67)   # digitado inteiro lá
+        igual(correcao.aceita("Maria Souza", "M. Souza"), 100)
+        igual(correcao.aceita("Maria Souza", "Maria Santos"), 0)                               # 1 palavra só não basta
+        igual(correcao.aceita("Maria Souza", "Dr. Souza"), 50)
         assert correcao.data_confere("6/4", "06/04/2026") and correcao.data_confere("06.04.26", "06/04/2026")
         assert not correcao.data_confere("06/04/2025", "06/04/2026") and correcao.data_confere("", "06/04/2026")
         igual((correcao.horas_do_certificado("4"), correcao.horas_do_certificado("08:00 - 12:30"),
